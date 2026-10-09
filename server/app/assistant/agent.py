@@ -124,6 +124,14 @@ def _attachment_text(att: dict) -> str:
 def build_messages(body: dict) -> tuple[list[dict], dt.datetime, str | None]:
     ctx = body.get("context") or {}
     now = parse_datetime(ctx.get("now")) if ctx.get("now") else None
+    # Keep the request's local calendar date; Store serializes instants to UTC.
+    if now is not None and isinstance(ctx.get("now"), str):
+        try:
+            local_now = dt.datetime.fromisoformat(ctx["now"].strip().replace("Z", "+00:00"))
+            if local_now.tzinfo is not None:
+                now = local_now
+        except ValueError:
+            pass
     now = now or utcnow()
     user_email = (ctx.get("user") or "").strip().lower() or None
     user = None
