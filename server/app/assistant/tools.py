@@ -270,6 +270,118 @@ class ToolContext:
         out["last_activities"] = self.list_activities(store, company_id=str(cid), limit=8)["results"]
         return out
 
+    def list_deal_line_items(self, store: Store, deal_id: str, limit: int = 25, after: str | None = None):
+        """Return a bounded, pageable view of a deal's line items and products."""
+        deal = store.get("deals", deal_id)
+        did = int(deal["id"])
+        page_limit = min(max(int(limit or MAX_LIST), 1), MAX_LIST)
+
+        params: list = [did]
+        after_sql = ""
+        if after not in (None, ""):
+            try:
+                after_id = int(str(after))
+            except ValueError:
+                return {"error": f"cursore di paginazione non valido: {after}"}
+            after_sql = " AND a.to_id > %s"
+            params.append(after_id)
+        params.append(page_limit + 1)
+
+        rows = store.conn.execute(
+            f"""
+            WITH page AS (
+                SELECT DISTINCT a.to_id AS line_item_id
+                FROM associations a
+                JOIN objects line_item
+                  ON line_item.id = a.to_id
+                 AND line_item.object_type = 'line_items'
+                 AND NOT line_item.archived
+                WHERE a.from_id = %s
+                  AND a.from_type = 'deals'
+                  AND a.to_type = 'line_items'
+                  {after_sql}
+                ORDER BY a.to_id
+                LIMIT %s
+            )
+            SELECT line_item.*,
+                   product.id AS product_id,
+                   product.properties AS product_properties
+            FROM page
+            JOIN objects line_item ON line_item.id = page.line_item_id
+            LEFT JOIN LATERAL (
+                SELECT p.id, p.properties
+                FROM associations product_assoc
+                JOIN objects p
+                  ON p.id = product_assoc.to_id
+                 AND p.object_type = 'products'
+                 AND NOT p.archived
+                WHERE product_assoc.from_id = line_item.id
+                  AND product_assoc.from_type = 'line_items'
+                  AND product_assoc.to_type = 'products'
+                ORDER BY p.id
+                LIMIT 1
+            ) product ON TRUE
+            ORDER BY line_item.id
+            """,
+            params,
+        ).fetchall()
+
+        truncated = len(rows) > page_limit
+        rows = rows[:page_limit]
+        results = []
+        for row in rows:
+            props = row["properties"]
+            product_props = row["product_properties"] or {}
+            product = None
+            if row["product_id"] is not None:
+                product = {
+                    "id": str(row["product_id"]),
+                    "name": product_props.get("name"),
+                    "sku": product_props.get("hs_sku"),
+                    "unit_price": product_props.get("price"),
+                }
+            results.append({
+                "id": str(row["id"]),
+                "id_legacy": props.get("id_legacy"),
+                "name": props.get("name"),
+                "sku": props.get("hs_sku"),
+                "quantity": props.get("quantity"),
+                "unit_price": props.get("price"),
+                "discount": {
+                    "percentage": props.get("hs_discount_percentage"),
+                    "unit_amount": props.get("discount"),
+                    "total_amount": props.get("hs_total_discount"),
+                },
+                "amount": props.get("amount"),
+                "currency": props.get("hs_line_item_currency_code"),
+                "product": product,
+            })
+
+        total = store.conn.execute(
+            """
+            SELECT count(DISTINCT a.to_id) AS n
+            FROM associations a
+            JOIN objects line_item
+              ON line_item.id = a.to_id
+             AND line_item.object_type = 'line_items'
+             AND NOT line_item.archived
+            WHERE a.from_id = %s
+              AND a.from_type = 'deals'
+              AND a.to_type = 'line_items'
+            """,
+            (did,),
+        ).fetchone()["n"]
+        next_page = {"after": str(rows[-1]["id"])} if truncated and rows else None
+        return {
+            "deal_id": str(did),
+            "total": total,
+            "returned": len(results),
+            "limit": page_limit,
+            "truncated": truncated,
+            "paging": {"next": next_page},
+            "results": results,
+        }
+
     def list_activities(self, store: Store, contact_id=None, deal_id=None, company_id=None, year=None, limit=15):
         limit = min(int(limit or 15), MAX_LIST)
         params: list = []
@@ -549,6 +661,7 @@ TOOL_SCHEMAS = [
     _schema("search_tickets", "Cerca ticket di assistenza per oggetto, azienda, contatto, fase, assegnatario, priorità, solo aperti.", {"subject": S("oggetto o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "stage": S("Aperto, In lavorazione, In attesa del cliente, Chiuso"), "assegnatario": S("email"), "priority": S("LOW, MEDIUM, HIGH, URGENT"), "open_only": B("solo non chiusi"), "limit": I("max risultati")}),
     _schema("get_record", "Legge un record completo (proprietà e associazioni) dato tipo e id.", {"object_type": S("companies, contacts, deals, tickets, products, line_items, notes, calls, emails, meetings, tasks"), "id": S("id del record")}, ["object_type", "id"]),
     _schema("company_overview", "Scheda completa di un'azienda: dati, fatturato 2025 e classe, contatti, trattative, ticket, ultime attività. Usala per domande su un cliente.", {"company_id": S("id azienda")}, ["company_id"]),
+    _schema("list_deal_line_items", "Elenca le righe di una trattativa con id corrente e legacy, nome, SKU, quantità, prezzo unitario, sconto, importo e prodotto associato. Restituisce totale, troncamento e cursore per la pagina successiva.", {"deal_id": S("id trattativa"), "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "max risultati (default 25)"}, "after": S("cursore restituito da paging.next.after")}, ["deal_id"]),
     _schema("list_activities", "Elenca note, chiamate, email, riunioni e task di un contatto, di una trattativa o di un'azienda, opzionalmente di un anno.", {"contact_id": S("id contatto"), "deal_id": S("id trattativa"), "company_id": S("id azienda"), "year": I("anno"), "limit": I("max risultati")}),
     _schema("revenue", "Fatturato di un'azienda in un anno con la regola R8 (trattative vinte/rinnovate chiuse nell'anno, storni sottratti, USD x0.92, GBP x1.17). Calcolo deterministico.", {"company_id": S("id azienda"), "year": I("anno, default 2025")}, ["company_id"]),
     _schema("deal_stats", "Conteggi e totali in euro delle trattative, per fase, filtrabili per azienda, commerciale, pipeline, fase, anno di chiusura, solo aperte.", {"company_id": S("id azienda"), "commerciale": S("email commerciale"), "pipeline": S("Vendite o Rinnovi"), "stage": S("fase"), "year": I("anno di closedate"), "open_only": B("solo aperte")}),
