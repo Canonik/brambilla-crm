@@ -162,6 +162,12 @@ class ToolContext:
                 return {"total": len(results), "results": results}
         return {"total": res["total"], "results": results}
 
+    def _pipeline(self, store: Store, object_type: str, pipeline: str) -> dict | None:
+        value = str(pipeline).strip()
+        if object_type == "deals" and value.lower() == "vendite":
+            value = "default"
+        return store.pipeline_by_label(object_type, value) or next((p for p in store.pipelines(object_type) if p["id"] == value), None)
+
     def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15):
         filters = []
         if company_id:
@@ -169,13 +175,16 @@ class ToolContext:
         if contact_id:
             filters.append({"propertyName": "associations.contact", "operator": "IN", "values": [str(contact_id)]})
         if pipeline:
-            pl = store.pipeline_by_label("deals", pipeline) or next((p for p in store.pipelines("deals") if p["id"] == pipeline), None)
-            if pl:
-                filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pl["id"]})
+            pl = self._pipeline(store, "deals", pipeline)
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {pipeline}"}
+            pipeline = pl["id"]
+            filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pipeline})
         if stage:
             sid = self._stage_id(store, "deals", stage, pipeline)
-            if sid:
-                filters.append({"propertyName": "dealstage", "operator": "EQ", "value": sid})
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            filters.append({"propertyName": "dealstage", "operator": "EQ", "value": sid})
         if commerciale:
             filters.append({"propertyName": "commerciale", "operator": "EQ", "value": commerciale.strip().lower()})
         if closed_from:
@@ -195,8 +204,9 @@ class ToolContext:
             filters.append({"propertyName": "associations.contact", "operator": "IN", "values": [str(contact_id)]})
         if stage:
             sid = self._stage_id(store, "tickets", stage, None)
-            if sid:
-                filters.append({"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": sid})
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            filters.append({"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": sid})
         if assegnatario:
             filters.append({"propertyName": "assegnatario", "operator": "EQ", "value": assegnatario.strip().lower()})
         if priority:
@@ -439,15 +449,18 @@ class ToolContext:
             where.append("properties->>'commerciale' = %s")
             params.append(commerciale.strip().lower())
         if pipeline:
-            pl = store.pipeline_by_label("deals", pipeline) or next((p for p in store.pipelines("deals") if p["id"] == pipeline), None)
-            if pl:
-                where.append("properties->>'pipeline' = %s")
-                params.append(pl["id"])
+            pl = self._pipeline(store, "deals", pipeline)
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {pipeline}"}
+            pipeline = pl["id"]
+            where.append("properties->>'pipeline' = %s")
+            params.append(pipeline)
         if stage:
             sid = self._stage_id(store, "deals", stage, pipeline)
-            if sid:
-                where.append("properties->>'dealstage' = %s")
-                params.append(sid)
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            where.append("properties->>'dealstage' = %s")
+            params.append(sid)
         if year:
             where.append("properties->>'closedate' >= %s AND properties->>'closedate' < %s")
             params.extend([f"{int(year)}-01-01", f"{int(year) + 1}-01-01"])
@@ -520,6 +533,11 @@ class ToolContext:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
         props = dict(properties or {})
         if ot == "deals":
+            if props.get("pipeline"):
+                pl = self._pipeline(store, "deals", props["pipeline"])
+                if pl is None:
+                    return {"error": f"pipeline sconosciuta: {props['pipeline']}"}
+                props["pipeline"] = pl["id"]
             props.setdefault("commerciale", self.user_email)
             if props.get("dealstage") and not store.stage_lookup("deals", props["dealstage"]):
                 sid = self._stage_id(store, "deals", props["dealstage"], props.get("pipeline"))
@@ -576,6 +594,11 @@ class ToolContext:
         if ot is None:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
         props = dict(properties or {})
+        if ot == "deals" and props.get("pipeline"):
+            pl = self._pipeline(store, "deals", props["pipeline"])
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {props['pipeline']}"}
+            props["pipeline"] = pl["id"]
         if ot == "deals" and props.get("dealstage") and not store.stage_lookup("deals", props["dealstage"]):
             cur = store.get("deals", id)["properties"]
             sid = self._stage_id(store, "deals", props["dealstage"], props.get("pipeline") or cur.get("pipeline"))
@@ -631,8 +654,13 @@ class ToolContext:
         ot = defaults.resolve_type(object_type)
         if ot is None:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
+        records = records or []
+        if not isinstance(records, list):
+            return {"error": "records deve essere una lista", "status": 400}
+        if len(records) > 200:
+            return {"error": "massimo 200 record per chiamata; suddividi l'elenco in più chiamate", "status": 400}
         results = []
-        for rec in (records or [])[:200]:
+        for rec in records:
             props = rec.get("properties") if isinstance(rec, dict) and "properties" in rec else rec
             assoc = rec.get("associations") if isinstance(rec, dict) else None
             results.append(self.create_record(store, ot, props or {}, assoc))
@@ -684,16 +712,20 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         return {"error": f"strumento sconosciuto: {name}"}
     with db.connection() as conn:
         store = Store(conn, ctx.now)
+        write_start = len(ctx.writes)
         try:
             out = fn(store, **(args or {}))
             conn.commit()
             return out
         except ApiError as e:
+            del ctx.writes[write_start:]
             conn.rollback()
             return {"error": e.message, "status": e.status}
         except TypeError as e:
+            del ctx.writes[write_start:]
             conn.rollback()
             return {"error": f"argomenti non validi: {e}"}
         except Exception as e:
+            del ctx.writes[write_start:]
             conn.rollback()
             return {"error": f"errore interno: {type(e).__name__}: {str(e)[:200]}"}
