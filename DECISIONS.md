@@ -41,6 +41,12 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 - **How it's written**: `116.903,80`, `205,657.60`, `2947.68`, `488210,35`, `1.247.204,29`, `1,257,280.17`, with currency `€`, `$`, `£`, `EUR`, `USD`, `GBP` before or after, with or without space.
 - **Rule**: strip currency symbols/codes and spaces; if both `.` and `,` appear the last one is the decimal separator; if only one appears it is the decimal separator (in the export a lone separator is always followed by 1 or 2 digits, never 3, so no thousands ambiguity). Round to 2 decimals. Status: decided.
 
+### 0.7 Three files mix UTF-8 rows into Windows-1252 files
+- **Where**: `aziende.csv` (1,205 rows), `contatti.csv` (1,917 rows), `ticket.csv` (1,537 rows); the other six files are pure cp1252.
+- **How it's written**: company 312638 is the bytes `Societ\xc3\xa0 Verniciature` (UTF-8 for `Società`) inside a file whose other rows encode `à` as the single byte `\xe0`.
+- **How you noticed**: decoding the whole file as cp1252 yields `SocietÃ ` and a trailing no-break space that `strip()` then eats, so names, cities, subjects and contents came out wrong for those rows.
+- **Rule**: decode each field as cp1252, then if the result re-encodes to cp1252 bytes that are valid UTF-8 containing non-ASCII, take the UTF-8 decoding instead; repair before trimming. Status: decided (found 11:30 by the oracle reconciliation).
+
 ## 1. Companies (R1, R7)
 
 ### 1.1 Website to domain
@@ -131,7 +137,7 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 - `stato` (17 spellings) → stage: `nuovo`/`aperto` → Aperto; `in lavorazione`/`lavorazione` → In lavorazione; `in attesa`/`in attesa cliente`/`attesa cliente` → In attesa del cliente; `chiuso`/`risolto` → Chiuso. Status: decided.
 - `priorita`: `bassa`/`1 - Bassa` → LOW; `media`/`2 - Media`/`Normale` → MEDIUM; `alta`/`3 - Alta` → HIGH; `urgente`/`4 - Urgente`/`URGENTE!!` → URGENT; empty (2,147) → no priority. Status: decided.
 - `aperto_il` → `createdate`, `chiuso_il` → `closed_date` (every closed/resolved ticket has one, no open one does). `subject`/`content` trimmed, content kept whole. `assegnatario` per section 3. `id_legacy` = `id_ticket`.
-- **The sender in the description**: 5,645 descriptions start with a line `Da: <email>`; 536 of those tickets have no `id_contatto`, and the email is a live contact's in 5,355 cases (agrees with `id_contatto` in 5,089 of 5,109 where both exist). **Rule**: when `id_contatto` is empty or invalid, the contact is the one whose email equals the `Da:` address, if any. Company only from `id_azienda`. Status: decided.
+- **The sender in the description**: 5,645 descriptions start with a line `Da: <email>`; 536 of those tickets have no `id_contatto`, and the email is a live contact's in 5,355 cases (agrees with `id_contatto` in 5,089 of 5,109 where both exist). **Rule**: when `id_contatto` is empty, or points to a deleted or missing contact (46 such tickets in the sample), the contact is the one whose email equals the `Da:` address, if any: the fallback runs after the reference is resolved, so 456 tickets get their contact from the header. Company only from `id_azienda`. Status: decided (clarified 11:35).
 
 ## 7. Activities (R6)
 

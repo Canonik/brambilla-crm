@@ -65,3 +65,20 @@ No `/ui/api/*` endpoints and no `/ui/login` are needed any more (contract sectio
 uses only the HubSpot endpoints, `/health` and `/__agente`. Optional P4 when everything else is
 green: `POST /__agente?trace=1` adds a `trace` array next to `reply`; without the parameter the
 body stays exactly `{"reply": "..."}`.
+
+
+## 11:35, reconciliation interim (oracle vs server on 8010, migrated sample)
+
+Deals, line items, products, the full R8 vector (every company's `fatturato_2025` and
+`classe_cliente`, class totals 52/25/65) and the full dormant list (936/936) match the oracle
+record for record. Counts match on every type.
+
+Fix needed, small: 46 tickets whose `id_contatto` points to a **deleted** contact and whose
+description starts with `Da: <email>` of a live contact get no contact association. DECISIONS 6
+(clarified now): the `Da:` fallback applies when `id_contatto` is empty **or resolves to
+nothing** (deleted/missing), so `tickets_contact_from_da_line` should be 456, not 410.
+Examples: ticket 336808 (`id_contatto` 1029761 deleted, `Da: fontana.stefano@gmail.com` ->
+contact 3256652), 693489 -> 1904632, 898572 -> 5594791.
+
+For the record: the mixed UTF-8/cp1252 rows (DECISIONS 0.7) are already handled by the server;
+the oracle had to catch up.

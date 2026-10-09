@@ -59,6 +59,11 @@ file, column, example row, row count, what the CRM does.
 - Where: `righe_offerta.csv` (`BF-12288`, `art. 52614`, `BF 50096`, `bf49139`, `55091`, `BF.49711`; `1 pz`, `197,2 m`; `0,25`, `25 %`, `0.03`), `listino.csv` (`BF38295`, ` BF-89712`, `bf-98503`; 122 codes republished at a new price).
 - How many rows: 1,173 line codes with fewer than 5 digits; 889 line codes with no product; 2,761 lines without a price; 9,804 without a discount.
 
+**Case: UTF-8 rows inside Windows-1252 files**
+- Where: `aziende.csv` (1,205 rows), `contatti.csv` (1,917), `ticket.csv` (1,537); the other six files are pure cp1252.
+- How it's written: company 312638 is the bytes `Societ\xc3\xa0 Verniciature` in a file where the other rows write `à` as one byte.
+- How you noticed: decoding everything as cp1252 produced `SocietÃ ` in 940 company names, 326 cities, 1,911 contact names, 998 ticket contents and 368 subjects; the migration and the independent oracle disagreed on exactly those rows until the per-field repair was added.
+
 **Case: the deleted flag written nine ways; whitespace everywhere**
 - `cancellato` in {`''`,`0`,`N`,`NO`,`1`,`S`,`s`,`SI`,`Sì`}; 1,240 company names, 4,340 first names, 1,189 ticket subjects, 18,783 activity texts padded with spaces.
 
@@ -73,7 +78,8 @@ Source: `DECISIONS.md` sections 0 to 9 of the repo. Summaries:)
 - Monthly amounts × 12; `k`/`mila` × 1,000; `mln` × 1,000,000; parentheses and leading/trailing minus negative; amounts stay negative so R8 subtracts them.
 - Deals with quote lines take the sum of their lines, each line rounded to the cent (12,013 of 12,139 match `importo` exactly, the other 126 differ by 1-2 cents, which is the rounding the request describes).
 - Close dates: six formats parsed day-first; missing close date on a closed deal taken from the history entry into that stage. `fase` wins over the history's last stage where they disagree (3,396 deals).
-- Tickets: `Da:` email resolves the contact only when `id_contatto` is empty or invalid.
+- Tickets: `Da:` email resolves the contact when `id_contatto` is empty or points to a deleted/missing contact (456 tickets).
+- Encodings: each field decoded as cp1252, re-read as UTF-8 when the bytes are valid UTF-8 with non-ASCII characters, before trimming.
 - Emails: trimmed, lower-cased, `(at)` and ` @` repaired, then validated; the rest is an absent email; duplicates merged by email.
 - Products: `BF-` + five zero-padded digits; latest live row per code; lines without a product keep their own description and price.
 - R8/R9 computed at the end of the migration from the imported records (fixed FX 0.92 / 1.17, class thresholds, dormant = at least one won deal and no 2025 activity among the company's contacts' and deals' activities).
