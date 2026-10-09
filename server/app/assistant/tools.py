@@ -114,7 +114,7 @@ class ToolContext:
         return res
 
     # ---------------------------------------------------------- read tools
-    def search_companies(self, store: Store, name=None, domain=None, partita_iva=None, city=None, classe_cliente=None, query=None, limit=10, id_legacy=None):
+    def search_companies(self, store: Store, name=None, domain=None, partita_iva=None, city=None, classe_cliente=None, query=None, limit=10, id_legacy=None, sort_by=None, sort_direction=None):
         filters = []
         if id_legacy:
             filters.append({"propertyName": "id_legacy", "operator": "EQ", "value": str(id_legacy).strip()})
@@ -127,7 +127,11 @@ class ToolContext:
         if classe_cliente:
             filters.append({"propertyName": "classe_cliente", "operator": "EQ", "value": classe_cliente})
         q = name or query
-        res = self._search(store, "companies", filters, q, limit)
+        sort_fields = {"name", "city", "fatturato_2025", "classe_cliente"}
+        if sort_by and sort_by not in sort_fields:
+            return {"error": f"ordinamento aziende non valido: {sort_by}"}
+        sorts = [{"propertyName": sort_by, "direction": sort_direction or "ASCENDING"}] if sort_by else None
+        res = self._search(store, "companies", filters, q, limit, sorts=sorts)
         results = [self._company_brief(store, r) for r in res["results"]]
         if name:
             exact = [r for r in results if (r["name"] or "").strip().lower() == name.strip().lower()]
@@ -137,7 +141,7 @@ class ToolContext:
             if not results:
                 core = re.sub(r"\b(s\.?p\.?a\.?|s\.?r\.?l\.?s?\.?|s\.?a\.?s\.?|s\.?n\.?c\.?|srl|spa|sas|snc)\b", "", name, flags=re.I).strip()
                 if core and core.lower() != name.strip().lower():
-                    res = self._search(store, "companies", filters, core, limit)
+                    res = self._search(store, "companies", filters, core, limit, sorts=sorts)
                     results = [self._company_brief(store, r) for r in res["results"]]
         total = res["total"]
         if name and not results:
@@ -410,7 +414,7 @@ class ToolContext:
             value = "default"
         return store.pipeline_by_label(object_type, value) or next((p for p in store.pipelines(object_type) if p["id"] == value), None)
 
-    def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15, id_legacy=None):
+    def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15, id_legacy=None, sort_by="closedate", sort_direction="DESCENDING"):
         filters = []
         commerciale = self._user_filter(store, commerciale)
         if id_legacy:
@@ -438,10 +442,13 @@ class ToolContext:
             filters.append({"propertyName": "closedate", "operator": "LTE", "value": closed_to})
         if open_only:
             filters.append({"propertyName": "hs_is_closed", "operator": "NEQ", "value": "true"})
-        res = self._search(store, "deals", filters, name or query, limit, sorts=[{"propertyName": "closedate", "direction": "DESCENDING"}])
+        sort_fields = {"closedate", "amount", "dealname"}
+        if sort_by not in sort_fields:
+            return {"error": f"ordinamento trattative non valido: {sort_by}"}
+        res = self._search(store, "deals", filters, name or query, limit, sorts=[{"propertyName": sort_by, "direction": sort_direction}])
         return {"total": res["total"], "results": [self._deal_brief(store, r) for r in res["results"]]}
 
-    def search_tickets(self, store: Store, subject=None, company_id=None, contact_id=None, stage=None, assegnatario=None, priority=None, open_only=None, query=None, limit=15, id_legacy=None):
+    def search_tickets(self, store: Store, subject=None, company_id=None, contact_id=None, stage=None, assegnatario=None, priority=None, open_only=None, created_from=None, created_to=None, query=None, limit=15, id_legacy=None, sort_by="createdate", sort_direction="DESCENDING", include_stats=None):
         filters = []
         assegnatario = self._user_filter(store, assegnatario)
         if id_legacy:
@@ -459,12 +466,28 @@ class ToolContext:
             filters.append({"propertyName": "assegnatario", "operator": "EQ", "value": assegnatario.strip().lower()})
         if priority:
             filters.append({"propertyName": "hs_ticket_priority", "operator": "EQ", "value": priority.strip().upper()})
+        if created_from:
+            filters.append({"propertyName": "createdate", "operator": "GTE", "value": created_from})
+        if created_to:
+            filters.append({"propertyName": "createdate", "operator": "LTE", "value": created_to})
         if open_only:
             closed_ids = [s["id"] for p in store.pipelines("tickets") for s in p["stages"] if str(s.get("metadata", {}).get("ticketState", "")).upper() == "CLOSED"]
             if closed_ids:
                 filters.append({"propertyName": "hs_pipeline_stage", "operator": "NOT_IN", "values": closed_ids})
-        res = self._search(store, "tickets", filters, subject or query, limit, sorts=[{"propertyName": "createdate", "direction": "DESCENDING"}])
-        return {"total": res["total"], "results": [self._ticket_brief(store, r) for r in res["results"]]}
+        sort_fields = {"createdate", "priority", "subject"}
+        sort_property = {"priority": "hs_ticket_priority"}.get(sort_by, sort_by)
+        if sort_by not in sort_fields:
+            return {"error": f"ordinamento ticket non valido: {sort_by}"}
+        res = self._search(store, "tickets", filters, subject or query, limit, sorts=[{"propertyName": sort_property, "direction": sort_direction}])
+        out = {"total": res["total"], "results": [self._ticket_brief(store, r) for r in res["results"]]}
+        if include_stats and not priority:
+            out["by_priority"] = {
+                p: self._search(store, "tickets", filters + [{"propertyName": "hs_ticket_priority", "operator": "EQ", "value": p}], subject or query, 1)["total"]
+                for p in ("LOW", "MEDIUM", "HIGH", "URGENT")
+            }
+            known = sum(out["by_priority"].values())
+            out["by_priority"]["SENZA PRIORITÀ"] = max(out["total"] - known, 0)
+        return out
 
     def _stage_id(self, store: Store, object_type: str, stage: str, pipeline: str | None) -> str | None:
         s = (stage or "").strip().lower()
@@ -687,7 +710,7 @@ class ToolContext:
         stored = store.conn.execute("SELECT properties->>'fatturato_2025' AS f, properties->>'classe_cliente' AS c FROM objects WHERE id = %s", (cid,)).fetchone()
         return {"company_id": str(cid), "year": int(year), "total_eur": str(total), "total_eur_it": _it_money(total), "won_deals": deals, "stored_fatturato_2025": stored["f"] if stored else None, "classe_cliente": stored["c"] if stored else None}
 
-    def deal_stats(self, store: Store, company_id=None, commerciale=None, pipeline=None, stage=None, year=None, open_only=None):
+    def deal_stats(self, store: Store, company_id=None, commerciale=None, pipeline=None, stage=None, year=None, closed_from=None, closed_to=None, open_only=None, won_only=None):
         where = ["object_type = 'deals'", "NOT archived"]
         params: list = []
         commerciale = self._user_filter(store, commerciale)
@@ -713,8 +736,16 @@ class ToolContext:
         if year:
             where.append("properties->>'closedate' >= %s AND properties->>'closedate' < %s")
             params.extend([f"{int(year)}-01-01", f"{int(year) + 1}-01-01"])
+        if closed_from:
+            where.append("properties->>'closedate' >= %s")
+            params.append(closed_from)
+        if closed_to:
+            where.append("properties->>'closedate' <= %s")
+            params.append(closed_to)
         if open_only:
             where.append("COALESCE(properties->>'hs_is_closed', 'false') <> 'true'")
+        if won_only:
+            where.append("properties->>'hs_is_closed_won' = 'true'")
         rows = store.conn.execute(f"SELECT properties->>'dealstage' AS st, properties->>'deal_currency_code' AS cur, count(*) AS n, sum(NULLIF(properties->>'amount','')::numeric) AS s FROM objects WHERE {' AND '.join(where)} GROUP BY 1, 2", params).fetchall()
         sl, _ = self._labels(store)
         by_stage: dict[str, dict] = {}
@@ -730,24 +761,71 @@ class ToolContext:
             count += r["n"]
         return {"count": count, "total_eur": str(total_eur.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), "by_stage": {k: {"count": v["count"], "total_eur": str(v["total_eur"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))} for k, v in by_stage.items()}}
 
-    def my_customers(self, store: Store, user_email: str | None = None, limit=25):
+    def my_customers(self, store: Store, user_email: str | None = None, limit=25, classe_cliente=None, sort_by="name", sort_direction="ASCENDING"):
         email = (self._user_filter(store, user_email) or self.user_email or "").strip().lower()
         if not email:
             return {"error": "utente non indicato"}
+        sort_fields = {
+            "name": "c.properties->>'name'",
+            "fatturato_2025": "NULLIF(c.properties->>'fatturato_2025','')::numeric",
+            "deals": "deals",
+            "tickets": "tickets",
+        }
+        if sort_by not in sort_fields:
+            return {"error": f"ordinamento clienti non valido: {sort_by}"}
+        direction = "DESC" if str(sort_direction).upper().startswith("DESC") else "ASC"
+        class_sql = ""
+        class_params: list = []
+        if classe_cliente:
+            class_sql = " AND c.properties->>'classe_cliente' = %s"
+            class_params.append(str(classe_cliente).strip().upper())
         rows = store.conn.execute(
             """SELECT c.id, c.properties->>'name' AS name, c.properties->>'city' AS city, c.properties->>'classe_cliente' AS cls, c.properties->>'fatturato_2025' AS f,
                       count(DISTINCT d.id) FILTER (WHERE d.object_type = 'deals') AS deals, count(DISTINCT d.id) FILTER (WHERE d.object_type = 'tickets') AS tickets
                FROM objects d JOIN associations a ON a.from_id = d.id AND a.to_type = 'companies' JOIN objects c ON c.id = a.to_id AND NOT c.archived
                WHERE NOT d.archived AND ((d.object_type = 'deals' AND d.properties->>'commerciale' = %s) OR (d.object_type = 'tickets' AND d.properties->>'assegnatario' = %s))
-               GROUP BY c.id ORDER BY c.properties->>'name' LIMIT %s""",
-            (email, email, min(int(limit or 25), 100)),
+               """ + class_sql + f" GROUP BY c.id ORDER BY {sort_fields[sort_by]} {direction} NULLS LAST, c.id LIMIT %s",
+            [email, email] + class_params + [min(int(limit or 25), 100)],
         ).fetchall()
         total = store.conn.execute(
             """SELECT count(DISTINCT a.to_id) AS n FROM objects d JOIN associations a ON a.from_id = d.id AND a.to_type = 'companies' JOIN objects c ON c.id = a.to_id AND NOT c.archived
-               WHERE NOT d.archived AND ((d.object_type = 'deals' AND d.properties->>'commerciale' = %s) OR (d.object_type = 'tickets' AND d.properties->>'assegnatario' = %s))""",
-            (email, email),
+               WHERE NOT d.archived AND ((d.object_type = 'deals' AND d.properties->>'commerciale' = %s) OR (d.object_type = 'tickets' AND d.properties->>'assegnatario' = %s))""" + class_sql,
+            [email, email] + class_params,
         ).fetchone()["n"]
         return {"user": email, "total": total, "results": [{"id": str(r["id"]), "name": r["name"], "city": r["city"], "classe_cliente": r["cls"], "fatturato_2025": r["f"], "deals": r["deals"], "tickets": r["tickets"]} for r in rows]}
+
+    def company_stats(self, store: Store, classe_cliente=None, user_email=None, mine=None):
+        """Exact company counts and stored R8 revenue, optionally by customer class and follower."""
+        where = ["c.object_type = 'companies'", "NOT c.archived"]
+        params: list = []
+        if classe_cliente:
+            where.append("c.properties->>'classe_cliente' = %s")
+            params.append(str(classe_cliente).strip().upper())
+        email = None
+        if user_email or mine:
+            email = (self._user_filter(store, user_email) or self.user_email or "").strip().lower() if user_email else (self.user_email or "").strip().lower()
+            if not email:
+                return {"error": "utente non indicato"}
+            where.append("""c.id IN (SELECT a.to_id FROM objects d JOIN associations a ON a.from_id = d.id AND a.to_type = 'companies'
+                WHERE NOT d.archived AND ((d.object_type = 'deals' AND d.properties->>'commerciale' = %s) OR (d.object_type = 'tickets' AND d.properties->>'assegnatario' = %s)))""")
+            params.extend([email, email])
+        rows = store.conn.execute(
+            f"""SELECT COALESCE(c.properties->>'classe_cliente', '') AS class, count(*) AS n,
+                       COALESCE(sum(COALESCE(NULLIF(c.properties->>'fatturato_2025','')::numeric, 0)), 0) AS revenue
+                  FROM objects c WHERE {' AND '.join(where)} GROUP BY 1 ORDER BY 1""",
+            params,
+        ).fetchall()
+        total = sum(r["n"] for r in rows)
+        revenue = sum((r["revenue"] for r in rows), Decimal(0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        out = {
+            "count": total,
+            "total_fatturato_2025_eur": str(revenue),
+            "total_fatturato_2025_eur_it": _it_money(revenue),
+            "by_class": {(r["class"] or "SENZA CLASSE"): {"count": r["n"], "fatturato_2025_eur": str(r["revenue"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))} for r in rows},
+        }
+        if email:
+            out["user"] = email
+        return out
 
     def list_users(self, store: Store, query=None, active_only=True):
         sql = "SELECT * FROM crm_users"
@@ -983,17 +1061,18 @@ I = lambda d: {"type": "integer", "description": d}  # noqa: E731
 B = lambda d: {"type": "boolean", "description": d}  # noqa: E731
 
 TOOL_SCHEMAS = [
-    _schema("search_companies", "Cerca aziende per nome (anche parziale), dominio, partita IVA, città o classe. Restituisce id, nome, città, dominio, partita IVA, fatturato 2025 e classe.", {"name": S("nome o parte del nome"), "domain": S("dominio del sito"), "partita_iva": S("partita IVA 11 cifre"), "city": S("città"), "classe_cliente": S("A, B o C"), "limit": I("max risultati (default 10)")}),
+    _schema("search_companies", "Cerca aziende per nome (anche parziale), dominio, partita IVA, città o classe. Restituisce id, nome, città, dominio, partita IVA, fatturato 2025 e classe. Per classifiche usa sort_by='fatturato_2025' e sort_direction='DESCENDING': l'ordinamento avviene prima del limite.", {"name": S("nome o parte del nome"), "domain": S("dominio del sito"), "partita_iva": S("partita IVA 11 cifre"), "city": S("città"), "classe_cliente": S("A, B o C"), "sort_by": S("name, city, fatturato_2025 o classe_cliente"), "sort_direction": S("ASCENDING o DESCENDING"), "limit": I("max risultati (default 10, max 25)")}),
     _schema("search_contacts", "Cerca contatti per nome/cognome, email o azienda (company_id).", {"name": S("nome e/o cognome"), "email": S("email esatta"), "company_id": S("id azienda"), "limit": I("max risultati")}),
-    _schema("search_deals", "Cerca trattative per titolo, azienda, contatto, pipeline (Vendite/Rinnovi), fase, commerciale, intervallo di closedate, solo aperte.", {"name": S("titolo o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "pipeline": S("Sales Pipeline (id 'default', le Vendite) o Rinnovi"), "stage": S("etichetta fase, es. Vinta, Persa, Contratto, Rinnovato"), "commerciale": S("email del commerciale"), "closed_from": S("YYYY-MM-DD"), "closed_to": S("YYYY-MM-DD"), "open_only": B("solo trattative non chiuse"), "limit": I("max risultati")}),
-    _schema("search_tickets", "Cerca ticket di assistenza per oggetto, azienda, contatto, fase, assegnatario, priorità, solo aperti.", {"subject": S("oggetto o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "stage": S("Aperto, In lavorazione, In attesa del cliente, Chiuso"), "assegnatario": S("email"), "priority": S("LOW, MEDIUM, HIGH, URGENT"), "open_only": B("solo non chiusi"), "limit": I("max risultati")}),
+    _schema("search_deals", "Cerca trattative per titolo, azienda, contatto, pipeline (Vendite/Rinnovi), fase, commerciale, intervallo di closedate, solo aperte. Per classifiche usa sort_by='amount' e sort_direction='DESCENDING': l'ordinamento avviene prima del limite.", {"name": S("titolo o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "pipeline": S("Sales Pipeline (id 'default', le Vendite) o Rinnovi"), "stage": S("etichetta fase, es. Vinta, Persa, Contratto, Rinnovato"), "commerciale": S("email del commerciale"), "closed_from": S("YYYY-MM-DD"), "closed_to": S("YYYY-MM-DD"), "open_only": B("solo trattative non chiuse"), "sort_by": S("closedate, amount o dealname"), "sort_direction": S("ASCENDING o DESCENDING"), "limit": I("max risultati (max 25)")}),
+    _schema("search_tickets", "Cerca ticket per oggetto, azienda, contatto, fase, assegnatario, priorità, intervallo di apertura e stato aperto. Per conteggi esatti per priorità usa include_stats=true. Per il più vecchio usa sort_by='createdate', sort_direction='ASCENDING', limit=1.", {"subject": S("oggetto o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "stage": S("Aperto, In lavorazione, In attesa del cliente, Chiuso"), "assegnatario": S("email"), "priority": S("LOW, MEDIUM, HIGH, URGENT"), "open_only": B("solo non chiusi"), "created_from": S("data apertura minima YYYY-MM-DD"), "created_to": S("data apertura massima YYYY-MM-DD"), "sort_by": S("createdate, priority o subject"), "sort_direction": S("ASCENDING o DESCENDING"), "include_stats": B("aggiunge conteggi esatti by_priority"), "limit": I("max risultati (max 25)")}),
     _schema("get_record", "Legge un record completo (proprietà e associazioni) dato tipo e id.", {"object_type": S("companies, contacts, deals, tickets, products, line_items, notes, calls, emails, meetings, tasks"), "id": S("id del record")}, ["object_type", "id"]),
     _schema("company_overview", "Scheda completa di un'azienda: dati, fatturato 2025 e classe, contatti, trattative, ticket, ultime attività. Usala per domande su un cliente.", {"company_id": S("id azienda")}, ["company_id"]),
     _schema("list_deal_line_items", "Elenca le righe di una trattativa con id corrente e legacy, nome, SKU, quantità, prezzo unitario, sconto, importo e prodotto associato. Restituisce totale, troncamento e cursore per la pagina successiva.", {"deal_id": S("id trattativa"), "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "max risultati (default 25)"}, "after": S("cursore restituito da paging.next.after")}, ["deal_id"]),
     _schema("list_activities", "Elenca note, chiamate, email, riunioni e task di un contatto, di una trattativa o di un'azienda, opzionalmente di un anno.", {"contact_id": S("id contatto"), "deal_id": S("id trattativa"), "company_id": S("id azienda"), "year": I("anno"), "limit": I("max risultati")}),
     _schema("revenue", "Fatturato di un'azienda in un anno con la regola R8 (trattative vinte/rinnovate chiuse nell'anno, storni sottratti, USD x0.92, GBP x1.17). Calcolo deterministico.", {"company_id": S("id azienda"), "year": I("anno, default 2025")}, ["company_id"]),
-    _schema("deal_stats", "Conteggi e totali in euro delle trattative, per fase, filtrabili per azienda, commerciale, pipeline, fase, anno di chiusura, solo aperte.", {"company_id": S("id azienda"), "commerciale": S("email commerciale"), "pipeline": S("Vendite o Rinnovi"), "stage": S("fase"), "year": I("anno di closedate"), "open_only": B("solo aperte")}),
-    _schema("my_customers", "Le aziende seguite da un utente: quelle con trattative di cui è commerciale o ticket di cui è assegnatario. Default: l'utente che scrive.", {"user_email": S("email utente (default chi scrive)"), "limit": I("max risultati")}),
+    _schema("deal_stats", "Conteggi e totali in euro delle trattative, per fase, filtrabili per azienda, commerciale, pipeline, fase, anno o intervallo di chiusura, solo aperte o solo vinte. Usalo per totali esatti senza sommare a mano elenchi troncati.", {"company_id": S("id azienda"), "commerciale": S("email commerciale"), "pipeline": S("Vendite o Rinnovi"), "stage": S("fase"), "year": I("anno di closedate"), "closed_from": S("YYYY-MM-DD"), "closed_to": S("YYYY-MM-DD"), "open_only": B("solo aperte"), "won_only": B("solo vinte/rinnovate")}),
+    _schema("my_customers", "Le aziende seguite da un utente: quelle con trattative di cui è commerciale o ticket di cui è assegnatario. Default: chi scrive. Può filtrare la classe e ordinare per fatturato prima del limite; total resta esatto.", {"user_email": S("email o nome utente (default chi scrive)"), "classe_cliente": S("A, B o C"), "sort_by": S("name, fatturato_2025, deals o tickets"), "sort_direction": S("ASCENDING o DESCENDING"), "limit": I("max risultati (max 100)")}),
+    _schema("company_stats", "Conteggio e fatturato 2025 esatti delle aziende, complessivi e per classe, senza elenchi troncati né somme manuali. Filtra per classe; per 'i miei clienti' usa mine=true, per un collega user_email.", {"classe_cliente": S("A, B o C"), "mine": B("solo clienti seguiti da chi scrive"), "user_email": S("email o nome del collega")}),
     _schema("list_users", "Utenti Brambilla (commerciali) attivi con email, ruolo e responsabile. Usalo per risolvere nomi di colleghi in email.", {"query": S("nome o parte"), "active_only": B("default true")}),
     _schema("pipelines", "Pipeline e fasi (id ed etichette) di trattative e ticket.", {}),
     _schema("dormant_list", "Membri della lista Clienti dormienti, ciascuno con la sua ultima trattativa vinta. Per 'i miei clienti dormienti' usa mine=true (clienti seguiti da chi scrive: sue trattative o suoi ticket) oppure user_email per un collega. total = numero esatto di membri del filtro.", {"limit": I("max risultati (max 100)"), "mine": {"type": "boolean", "description": "solo i clienti di chi scrive"}, "user_email": S("email o nome del collega")}),
