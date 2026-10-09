@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 13:10 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:15 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -74,12 +74,13 @@ and 20-reader latency measurement (Agent 3 locally, Coordinator on Railway after
 | # | Defect | Area | Status on a6e39d4 | Owner | Due |
 |---|---|---|---|---|---|
 | 1 | FIXED in 2694c78 (f7d5273). Dated `2026-09` URL families were missing for pipelines, lists, owners, imports, exports, association batches and record associations (only objects and properties aliased). `tests/acceptance/test_dated_routes.py`: 5 of 7 fail. The organizer form check uses dated URLs. | conformity 10, possibly R9 reads | FIXED, deployed | Agent 3 | done 13:07 |
-| 2 | `/__agente` catch-all claims no changes even when earlier tool calls committed; choice-level model errors ignored | R13 quality | OPEN | Agent 2 | 13:20 |
+| 2 | `/__agente` catch-all claims no changes even when earlier tool calls committed; choice-level model errors ignored | R13 quality | FIXED in 3e02c1c (c3b6ecd) | Agent 2 | done |
 | 3 | Export create 200 instead of 202; VIEW export ignores `filterGroups` and sorts | conformity | OPEN | Agent 3 | after 1 |
 | 4 | `Infinity` raises, `NaN` stored; `fmt_money` HALF_EVEN vs migration HALF_UP; line item without quantity gets no `amount` (patch 03 on agent/backend-audit) | conformity, R13 maths | OPEN | Agent 3 | after 1 |
 | 5 | `hasUniqueValue` not enforced for API-created custom properties (R7 itself safe via index) | conformity | OPEN | Agent 3 | after 1 |
 | 6 | `recordIdsAdded` spelling (docs: `recordsIdsAdded`); import response lacks `mappedObjectTypeIds` | conformity | OPEN | Agent 3 | after 1 |
-| 7 | Ticket `Da:` fallback does not look at `hs_additional_emails` (patch 0002 on agent/score-optimization) | R5 hedge | OPEN | Agent 2 | with first commit |
+| 7 | Ticket `Da:` fallback does not look at `hs_additional_emails` (patch 0002 on agent/score-optimization) | R5 hedge | FIXED in 3e02c1c | Agent 2 | done |
+| 9 | closedate not set when a deal enters a closed stage via API or assistant (HubSpot sets it) | R13 operations | OPEN, decided 13:08 | Agent 3 | 13:45 |
 | 8 | Empty pipeline with `r1..r4` stage maps to Rinnovi while RICHIESTE says no pipeline means Vendite; zero rows in sample | R3, choice sheet | UNCLEAR, documented | Coordinator | choice sheet |
 
 Fixed since the audits (verified in code on a6e39d4): restart metadata loss (77c1f22), CSV delimiter hard-coded to `;`,
@@ -94,4 +95,6 @@ tickets with a dead contact reference use the `Da:` line.
 - 12:55 Migration and rules suites 32 passed on a6e39d4; tagged `hackitaly-good-001`.
 - 12:59 Dated-route acceptance test added (ca79381): 5 of 7 families fail; assigned to Agent 3 as P0.
 - 13:07 Release 2 pushed (2694c78): dated routes, malformed input 4xx (141 former 500s), rate limit 50000/10 s. Railway success 13:08.
-- 13:10 Merging agent/data-ai 1cc3c8f, agent/assistant-insights 932870b, agent/ui-architect 8823190; full check running.
+- 13:10 Merged agent/data-ai 1cc3c8f, agent/assistant-insights 932870b then ea36560, agent/ui-architect 8823190 (3e02c1c). Full check: unit 196, acceptance 65, vitest 60, clean npm ci build ok.
+- 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
+- 13:16 Release 3 push planned after the form check finishes.
