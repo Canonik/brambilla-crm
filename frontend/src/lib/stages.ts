@@ -96,6 +96,25 @@ export function isClosedStage(stage: StageLike | undefined | null): boolean {
   return isWonStage(stage) || isLostStage(stage) || isClosed(stage);
 }
 
+/** Ticket stages carry `ticketState` (HubSpot) and may also carry `isClosed`. */
+export function isClosedTicketStage(stage: (StageLike & { metadata?: { ticketState?: string } }) | undefined | null): boolean {
+  if (!stage) return false;
+  if (stage.metadata?.ticketState) return stage.metadata.ticketState.toUpperCase() === "CLOSED";
+  return isClosed(stage);
+}
+
+/**
+ * The reset seeds HubSpot's default ticket pipeline (id "0") and the
+ * migration adds Brambilla's "Assistenza". The UI works on Brambilla's one
+ * whenever it exists.
+ */
+export function pickSupportPipeline<T extends PipelineLike>(pipelines: T[] | undefined): T | undefined {
+  if (!pipelines?.length) return undefined;
+  const byLabel = pipelines.find((p) => (p.label ?? "").trim().toLowerCase() === "assistenza");
+  if (byLabel) return byLabel;
+  return pipelines.find((p) => p.id !== "0") ?? pipelines[0];
+}
+
 export function stageTone(stage: StageLike | undefined | null): Tone {
   if (!stage) return "neutral";
   if (isWonStage(stage)) return "good";

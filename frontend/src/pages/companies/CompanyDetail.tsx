@@ -18,7 +18,7 @@ import { LifecycleBadge, PriorityBadge, StageBadge, TicketStageBadge } from "@/c
 import { DateText, Money, OwnerChip, PropertyList, RecordLink, RelativeTime } from "@/components/crm/Values";
 import { ActivityFeed, NoteComposer } from "@/components/crm/ActivityFeed";
 import { formatMoney, fullName, toNumber } from "@/lib/format";
-import { isClosedStage, isWonStage } from "@/lib/stages";
+import { isClosedStage, isClosedTicketStage, isWonStage } from "@/lib/stages";
 import { sumEur } from "@/lib/money";
 import { userName } from "@/api/users";
 
@@ -78,7 +78,7 @@ export function CompanyDetail() {
   const wonDeals = deals.filter((d) => isWonStage(stageOf(d)));
   const openTickets = tickets.filter((t) => {
     const s = ticketStageOf(t);
-    return s ? !(s.metadata?.isClosed === "true" || s.metadata?.isClosed === true) : !t.properties.closed_date;
+    return s ? !isClosedTicketStage(s) : !t.properties.closed_date;
   });
   const pipelineValue = sumEur(openDeals.map((d) => ({ amount: d.properties.amount, currency: d.properties.deal_currency_code })));
   const owners = Array.from(new Set([...deals.map((d) => d.properties.commerciale), ...tickets.map((t) => t.properties.assegnatario)].filter(Boolean))) as string[];

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./endpoints";
 import type { Deal, Pipeline, Props } from "./types";
+import { pickSupportPipeline } from "@/lib/stages";
 
 export const keys = {
   health: ["health"] as const,
@@ -158,7 +159,7 @@ export function useDashboard(dealPipelines: Pipeline[] | undefined, ticketPipeli
     enabled: Boolean(dealPipelines && ticketPipelines),
     queryFn: async () => {
       const sales = dealPipelines!.find((p) => p.id === "default") ?? dealPipelines![0];
-      const support = ticketPipelines![0];
+      const support = pickSupportPipeline(ticketPipelines!);
       const stageCounts = sales
         ? await Promise.all(
             sales.stages.map(async (s) => ({

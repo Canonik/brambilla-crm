@@ -6,6 +6,7 @@ import type { RequestOptions } from "../client";
 import { ApiError } from "../client";
 import type { AgentRequest, Filter, SearchRequest } from "../types";
 import { buildMockDb, type MockDb, type Row } from "./fixtures";
+import { USERS } from "../users";
 
 let db: MockDb | null = null;
 function getDb() {
@@ -209,6 +210,20 @@ export async function mockRequest<T>(path: string, opts: RequestOptions = {}): P
       status: "ok",
       version: "2026-09",
       ui: { companies: "/companies", contacts: "/contacts", deals: "/deals", tickets: "/tickets", dormant: "/dormant", assistant: "/assistant" },
+    } as T;
+  }
+
+  if (pathname === "/crm/v3/owners") {
+    return {
+      results: USERS.map((u, i) => ({
+        id: `U${String(i + 1).padStart(2, "0")}`,
+        email: u.email,
+        firstName: u.name.split(" ")[0],
+        lastName: u.name.split(" ").slice(1).join(" "),
+        role: u.role,
+        archived: false,
+        active: true,
+      })),
     } as T;
   }
 

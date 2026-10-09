@@ -19,6 +19,7 @@ import type {
   AgentResponse,
   Company,
   Contact,
+  CrmUser,
   Deal,
   Engagement,
   EngagementType,
@@ -603,6 +604,30 @@ export function topCompanies(limit = 8) {
     sorts: [{ propertyName: "fatturato_2025", direction: "DESCENDING" }],
     limit,
   });
+}
+
+// ---------- owners (Brambilla's users, from utenti.csv) ----------
+
+interface OwnerRecord {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  role?: string | null;
+  archived?: boolean;
+  active?: boolean;
+}
+
+export async function listOwners(): Promise<CrmUser[]> {
+  const res = await call<{ results: OwnerRecord[] }>("/crm/v3/owners", { query: { limit: 500 } });
+  return (res.results ?? [])
+    .filter((o) => o.email && !o.archived && o.active !== false)
+    .map((o) => ({
+      email: o.email!.trim().toLowerCase(),
+      name: [o.firstName, o.lastName].filter(Boolean).join(" ").trim() || o.email!,
+      role: o.role ?? undefined,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "en"));
 }
 
 // ---------- health and assistant ----------

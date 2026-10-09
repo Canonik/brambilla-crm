@@ -1,10 +1,13 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { DEFAULT_USER, USERS, userByEmail } from "@/api/users";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { listOwners } from "@/api/endpoints";
+import { DEFAULT_USER, USERS, setKnownUsers, userByEmail } from "@/api/users";
 import type { CrmUser } from "@/api/types";
 
 // Who is using the CRM right now. The assistant contract needs an active
 // Brambilla user as `context.user`, and notes are logged under that name.
-// There is no login in this challenge, so the user is picked in the sidebar.
+// There is no login in this challenge, so the user is picked in the sidebar
+// from the owners the migration created (utenti.csv).
 
 const STORAGE_KEY = "brambilla.crm.user";
 
@@ -16,33 +19,45 @@ interface CurrentUserApi {
 
 const Ctx = createContext<CurrentUserApi | null>(null);
 
-function readStored(): CrmUser {
+function readStoredEmail(): string | null {
   try {
-    const email = window.localStorage.getItem(STORAGE_KEY);
-    return userByEmail(email) ?? DEFAULT_USER;
+    return window.localStorage.getItem(STORAGE_KEY);
   } catch {
-    return DEFAULT_USER;
+    return null;
   }
 }
 
 export function CurrentUserProvider({ children }: { children: ReactNode }) {
-  const [user, setUserState] = useState<CrmUser>(readStored);
+  const owners = useQuery({ queryKey: ["owners"], queryFn: listOwners, staleTime: 10 * 60_000, retry: 1 });
+  const users = owners.data && owners.data.length > 0 ? owners.data : USERS;
+  const [email, setEmail] = useState<string | null>(readStoredEmail);
+
+  useEffect(() => {
+    if (owners.data) setKnownUsers(owners.data);
+  }, [owners.data]);
+
+  const user = useMemo<CrmUser>(() => {
+    const stored = email ? users.find((u) => u.email === email.toLowerCase()) ?? userByEmail(email) : null;
+    if (stored) return stored;
+    return users.find((u) => u.email === DEFAULT_USER.email) ?? users[0] ?? DEFAULT_USER;
+  }, [email, users]);
+
   const api = useMemo<CurrentUserApi>(
     () => ({
       user,
-      users: USERS,
-      setUser: (email) => {
-        const u = userByEmail(email);
-        if (!u) return;
-        setUserState(u);
+      users,
+      setUser: (next) => {
+        const key = next.trim().toLowerCase();
+        if (!users.some((u) => u.email === key)) return;
+        setEmail(key);
         try {
-          window.localStorage.setItem(STORAGE_KEY, u.email);
+          window.localStorage.setItem(STORAGE_KEY, key);
         } catch {
           // ignore
         }
       },
     }),
-    [user],
+    [user, users],
   );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

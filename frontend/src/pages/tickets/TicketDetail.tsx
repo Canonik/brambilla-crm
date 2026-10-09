@@ -18,6 +18,7 @@ import { DateText, Money, OwnerChip, PropertyList, RecordLink } from "@/componen
 import { ActivityFeed, NoteComposer } from "@/components/crm/ActivityFeed";
 import { fullName } from "@/lib/format";
 import { displayStageLabel } from "@/lib/stages";
+import { userName } from "@/api/users";
 
 export function TicketDetail() {
   const { id } = useParams<{ id: string }>();
@@ -154,7 +155,12 @@ export function TicketDetail() {
                   disabled={update.isPending}
                   placeholder="Unassigned"
                   onChange={(e) => void patch({ assegnatario: e.target.value }, "Assignee updated")}
-                  options={users.map((u) => ({ value: u.email, label: u.name }))}
+                  options={[
+                    ...users.map((u) => ({ value: u.email, label: u.name })),
+                    ...(p.assegnatario && !users.some((u) => u.email === p.assegnatario!.toLowerCase())
+                      ? [{ value: p.assegnatario, label: `${userName(p.assegnatario)} (not active)` }]
+                      : []),
+                  ]}
                 />
               </div>
             </CardBody>
