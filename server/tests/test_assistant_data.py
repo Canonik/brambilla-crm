@@ -394,3 +394,11 @@ def test_archiving_a_company_with_open_deals_needs_confirmation(api):
     assert tool("archive_record", {"object_type": "companies", "id": comp["id"], "confirmed": True})["ok"]
     empty = company(api, "Acme Senza Deal", "8")
     assert tool("archive_record", {"object_type": "companies", "id": empty["id"]})["ok"]
+
+
+def test_system_prompt_carries_the_questions_and_reply_rules():
+    text = agent.system_prompt(NOW, None, CTX["user"])
+    assert "UN solo record corrispondente agisci subito" in text and "UNA domanda precisa che li nomina" in text
+    assert "Non chiedere mai ciò che è già scritto" in text
+    assert "riscrivi lo stato finale" in text and "due decimali" in text
+    assert "Non rinnovato" in text and "Rinnovato" in text
