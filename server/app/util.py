@@ -1,6 +1,6 @@
 import datetime as dt
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 UTC = dt.timezone.utc
 
@@ -108,6 +108,8 @@ def normalize_number(value) -> str | None:
                 d = Decimal(s2)
             except InvalidOperation:
                 return None
+    if not d.is_finite():
+        return None
     if d == d.to_integral_value():
         return str(int(d))
     s = format(d.normalize(), "f")
@@ -115,7 +117,7 @@ def normalize_number(value) -> str | None:
 
 
 def fmt_money(x: float | Decimal) -> str:
-    d = Decimal(str(x)).quantize(Decimal("0.01"))
+    d = Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     s = format(d, "f")
     return s
 

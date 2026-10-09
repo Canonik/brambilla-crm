@@ -294,6 +294,8 @@ class Store:
                 out["closed_date"] = iso(self.now)
 
     def _normalize_line_item(self, out: dict, existing: dict | None) -> None:
+        if existing is None and "quantity" not in out:
+            out["quantity"] = "1"
         merged = dict(existing or {})
         merged.update(out)
         q = merged.get("quantity")
