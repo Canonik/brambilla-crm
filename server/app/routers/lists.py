@@ -225,7 +225,7 @@ async def add_memberships(list_id: str, request: Request):
         ot = defaults.resolve_type(d["objectTypeId"])
         added, missing = add_members(conn, int(d["listId"]), ot, ids)
         conn.commit()
-    return {"recordIdsAdded": added, "recordIdsRemoved": [], "recordIdsMissing": missing}
+    return {"recordsIdsAdded": added, "recordIdsAdded": added, "recordIdsRemoved": [], "recordIdsMissing": missing}
 
 
 @router.put("/{list_id}/memberships/remove")
@@ -239,7 +239,7 @@ async def remove_memberships(list_id: str, request: Request):
             if r:
                 removed.append(str(rid))
         conn.commit()
-    return {"recordIdsAdded": [], "recordIdsRemoved": removed, "recordIdsMissing": []}
+    return {"recordsIdsAdded": [], "recordIdsAdded": [], "recordIdsRemoved": removed, "recordIdsMissing": []}
 
 
 @router.put("/{list_id}/memberships/add-and-remove")
@@ -255,7 +255,7 @@ async def add_remove_memberships(list_id: str, request: Request):
             if r:
                 removed.append(str(rid))
         conn.commit()
-    return {"recordIdsAdded": added, "recordIdsRemoved": removed, "recordIdsMissing": missing}
+    return {"recordsIdsAdded": added, "recordIdsAdded": added, "recordIdsRemoved": removed, "recordIdsMissing": missing}
 
 
 @router.delete("/{list_id}/memberships", status_code=204)
