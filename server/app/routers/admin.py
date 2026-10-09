@@ -42,8 +42,10 @@ def reset():
 async def migrate(request: Request):
     body = await json_body(request)
     url = body.get("export_url") if isinstance(body, dict) else None
-    if not url:
+    if not url or not isinstance(url, str):
         raise validation("export_url is required")
+    if not url.lower().startswith(("http://", "https://")):
+        raise validation("export_url must be an http or https address")
     from ..migration.importer import run_migration
     from starlette.concurrency import run_in_threadpool
     try:

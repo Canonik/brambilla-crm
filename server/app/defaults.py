@@ -32,7 +32,7 @@ _ALIASES.update({"company": "companies", "contact": "contacts", "deal": "deals",
 
 
 def resolve_type(name: str) -> str | None:
-    if name is None:
+    if not isinstance(name, str):
         return None
     return _ALIASES.get(name.strip().lower())
 

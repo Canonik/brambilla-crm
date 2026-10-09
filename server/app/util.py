@@ -131,6 +131,20 @@ def valid_email(s: str) -> bool:
     return bool(EMAIL_RE.match(s))
 
 
+MAX_RECORD_ID = 2**63 - 1
+
+
+def parse_record_id(value) -> int | None:
+    """A record id as stored (BIGINT): digits only, in range; anything else is None."""
+    if value is None or isinstance(value, bool):
+        return None
+    s = str(value).strip()
+    if not s.isdigit():
+        return None
+    v = int(s)
+    return v if v <= MAX_RECORD_ID else None
+
+
 def email_domain(email: str) -> str | None:
     if not email or "@" not in email:
         return None

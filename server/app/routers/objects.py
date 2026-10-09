@@ -6,7 +6,7 @@ from .. import db
 from ..errors import ApiError, not_found, validation
 from ..store import Store, record_out
 from ..util import iso, utcnow
-from .common import csv_list, int_limit, json_body, object_type_or_404
+from .common import batch_inputs, csv_list, int_limit, json_body, object_type_or_404
 
 router = APIRouter()
 
@@ -78,7 +78,7 @@ async def gdpr_delete(object_type: str, request: Request):
 async def batch_read(object_type: str, request: Request):
     ot = object_type_or_404(object_type)
     body = await json_body(request)
-    inputs = body.get("inputs") or []
+    inputs = batch_inputs(body, allow_scalars=True)
     props = body.get("properties")
     id_prop = body.get("idProperty")
     started = iso(utcnow())
@@ -113,7 +113,7 @@ def _dumps(obj) -> str:
 async def batch_create(object_type: str, request: Request):
     ot = object_type_or_404(object_type)
     body = await json_body(request)
-    inputs = body.get("inputs") or []
+    inputs = batch_inputs(body)
     started = iso(utcnow())
     results, errors = [], []
     with db.connection() as conn:
@@ -132,7 +132,7 @@ async def batch_create(object_type: str, request: Request):
 async def batch_update(object_type: str, request: Request):
     ot = object_type_or_404(object_type)
     body = await json_body(request)
-    inputs = body.get("inputs") or []
+    inputs = batch_inputs(body)
     started = iso(utcnow())
     results, errors = [], []
     with db.connection() as conn:
@@ -151,7 +151,7 @@ async def batch_update(object_type: str, request: Request):
 async def batch_upsert(object_type: str, request: Request):
     ot = object_type_or_404(object_type)
     body = await json_body(request)
-    inputs = body.get("inputs") or []
+    inputs = batch_inputs(body)
     started = iso(utcnow())
     results, errors = [], []
     with db.connection() as conn:
@@ -177,7 +177,7 @@ async def batch_archive(object_type: str, request: Request):
     body = await json_body(request)
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
+        for inp in batch_inputs(body, allow_scalars=True):
             s.archive(ot, inp.get("id") if isinstance(inp, dict) else inp)
         conn.commit()
     return Response(status_code=204)
@@ -256,7 +256,7 @@ def put_object_association_v3(object_type: str, object_id: str, to_type: str, to
         fid = s.resolve_id(ot, object_id, None)
         tid = s.resolve_id(tt, to_id, None)
         type_ids = None
-        if assoc_type.isdigit():
+        if assoc_type.isdigit() and len(assoc_type) < 10:
             type_ids = [int(assoc_type)]
         else:
             lab = conn.execute("SELECT type_id FROM association_labels WHERE name = %s", (assoc_type,)).fetchone()
@@ -274,6 +274,6 @@ def delete_object_association_v3(object_type: str, object_id: str, to_type: str,
     tt = object_type_or_404(to_type)
     with db.connection() as conn:
         s = Store(conn)
-        s.dissociate(ot, int(object_id), tt, int(to_id), None)
+        s.dissociate(ot, s.resolve_id(ot, object_id, None), tt, s.resolve_id(tt, to_id, None), None)
         conn.commit()
     return Response(status_code=204)
