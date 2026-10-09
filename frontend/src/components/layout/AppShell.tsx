@@ -30,10 +30,10 @@ export const INLINE_ASSISTANT_ROUTES = new Set(["/", "/assistant"]);
 function Wordmark() {
   return (
     <div className="flex items-center gap-2.5 px-3">
-      <span className="inline-flex size-7 items-center justify-center rounded-md bg-gentian font-wide text-[15px] font-bold text-white">B</span>
+      <span className="inline-flex size-7 items-center justify-center rounded-md bg-white font-wide text-[15px] font-bold text-[#111]">B</span>
       <div className="leading-tight">
-        <div className="font-wide text-[14px] font-semibold tracking-tight text-ink">Brambilla</div>
-        <div className="text-[11px] text-ink-3">Forniture CRM</div>
+        <div className="font-wide text-[14px] font-semibold tracking-tight text-white">Brambilla</div>
+        <div className="text-[11px] text-white/50">Forniture CRM</div>
       </div>
     </div>
   );
@@ -50,13 +50,13 @@ function Nav({ layoutId }: { layoutId: string }) {
           className={({ isActive }) =>
             cn(
               "relative flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium transition-colors",
-              isActive ? "text-gentian" : "text-ink-2 hover:bg-surface-3 hover:text-ink",
+              isActive ? "text-ink" : "text-white/70 hover:bg-white/10 hover:text-white",
             )
           }
         >
           {({ isActive }) => (
             <>
-              {isActive ? <motion.span layoutId={layoutId} className="absolute inset-0 rounded-md bg-gentian-soft" transition={SPRING} aria-hidden /> : null}
+              {isActive ? <motion.span layoutId={layoutId} className="absolute inset-0 rounded-md bg-white" transition={SPRING} aria-hidden /> : null}
               <item.icon className="relative size-4 shrink-0" aria-hidden />
               <span className="relative truncate">{item.label}</span>
             </>
@@ -108,18 +108,18 @@ export function AppShell() {
       }}
       className={cn(
         "group flex h-10 items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-semibold transition-colors",
-        assistant.open && !inline ? "bg-gentian-deep text-white" : "bg-gentian text-white hover:bg-gentian-deep",
+        assistant.open && !inline ? "bg-white/85 text-[#111]" : "bg-white text-[#111] hover:bg-white/90",
       )}
       aria-pressed={assistant.open && !inline}
     >
-      <AssistantMark size={20} className="bg-white/15 ring-1 ring-white/20" />
+      <AssistantMark size={20} />
       <span className="truncate">Ask the CRM</span>
-      <span className="ml-auto text-[11px] font-normal text-white/60">⌘J</span>
+      <span className="ml-auto text-[11px] font-normal text-[#111]/50">⌘J</span>
     </button>
   );
 
   const footer = (
-    <div className="mt-auto flex flex-col gap-2 border-t border-line px-2 pt-3">
+    <div className="mt-auto flex flex-col gap-2 border-t border-white/10 px-2 pt-3">
       {askButton}
       <label className="flex items-center gap-2 rounded-md px-1 py-1">
         <Avatar name={user.name} size="sm" />
@@ -128,7 +128,7 @@ export function AppShell() {
           value={user.email}
           onChange={(e) => setUser(e.target.value)}
           options={users.map((u) => ({ value: u.email, label: u.name }))}
-          className="min-w-0 flex-1 [&>select]:h-7 [&>select]:border-transparent [&>select]:bg-transparent [&>select]:px-1 [&>select]:text-[12.5px] [&>select]:hover:border-line-strong"
+          className="min-w-0 flex-1 [&>select]:h-7 [&>select]:border-transparent [&>select]:bg-transparent [&>select]:px-1 [&>select]:text-[12.5px] [&>select]:text-white [&>select]:hover:border-white/30 [&>svg]:text-white/60"
           aria-label="Working as"
         />
       </label>
@@ -142,32 +142,32 @@ export function AppShell() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="hidden w-60 shrink-0 flex-col gap-3 border-r border-line bg-surface py-3 md:flex">
+      <aside className="hidden w-56 shrink-0 flex-col gap-3 bg-[#111] py-3 md:flex">
         <Wordmark />
         <div className="px-2">
-          <PaletteTrigger onOpen={() => setPaletteOpen(true)} />
+          <PaletteTrigger dark onOpen={() => setPaletteOpen(true)} />
         </div>
         <Nav layoutId="nav-active-desktop" />
         {footer}
       </aside>
 
       {/* Mobile top bar */}
-      <div className="fixed inset-x-0 top-0 z-20 flex h-12 items-center justify-between border-b border-line bg-surface px-2 md:hidden">
+      <div className="fixed inset-x-0 top-0 z-20 flex h-12 items-center justify-between border-b border-white/10 bg-[#111] px-2 md:hidden">
         <Wordmark />
         <div className="flex items-center gap-0.5">
-          <button type="button" aria-label="Search or ask" onClick={() => setPaletteOpen(true)} className="rounded-md p-2 text-ink-2 hover:bg-surface-3">
+          <button type="button" aria-label="Search or ask" onClick={() => setPaletteOpen(true)} className="rounded-md p-2 text-white/80 hover:bg-white/10">
             <Search className="size-5" />
           </button>
-          <button type="button" aria-label="Ask the CRM" onClick={() => (inline ? document.querySelector<HTMLTextAreaElement>("textarea[data-composer]")?.focus() : assistant.toggle())} className="rounded-md p-2 hover:bg-surface-3">
+          <button type="button" aria-label="Ask the CRM" onClick={() => (inline ? document.querySelector<HTMLTextAreaElement>("textarea[data-composer]")?.focus() : assistant.toggle())} className="rounded-md p-2 hover:bg-white/10">
             <AssistantMark size={20} />
           </button>
-          <button type="button" aria-label={mobileOpen ? "Close menu" : "Open menu"} aria-expanded={mobileOpen} onClick={() => setMobileOpen((o) => !o)} className="rounded-md p-2 hover:bg-surface-3">
+          <button type="button" aria-label={mobileOpen ? "Close menu" : "Open menu"} aria-expanded={mobileOpen} onClick={() => setMobileOpen((o) => !o)} className="rounded-md p-2 text-white hover:bg-white/10">
             {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
         </div>
       </div>
       {mobileOpen ? (
-        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-3 bg-surface py-3 md:hidden">
+        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-3 bg-[#111] py-3 md:hidden">
           <Nav layoutId="nav-active-mobile" />
           {footer}
         </div>

@@ -245,13 +245,14 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   );
 }
 
-export function PaletteTrigger({ onOpen, className }: { onOpen: () => void; className?: string }) {
+export function PaletteTrigger({ onOpen, className, dark }: { onOpen: () => void; className?: string; dark?: boolean }) {
   return (
     <button
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex h-8 w-full items-center gap-2 rounded-md border border-line bg-surface-2 px-2.5 text-left text-[13px] text-ink-3 transition-colors hover:border-line-strong hover:bg-surface hover:text-ink-2",
+        dark ? "border-white/15 bg-white/5 text-white/55 hover:border-white/30 hover:bg-white/10 hover:text-white" : "border-line bg-surface-2 text-ink-3 hover:border-line-strong hover:bg-surface hover:text-ink-2",
+        "flex h-8 w-full items-center gap-2 rounded-md border px-2.5 text-left text-[13px] transition-colors",
         className,
       )}
     >

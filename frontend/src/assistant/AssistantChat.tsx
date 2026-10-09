@@ -47,8 +47,9 @@ export function useSuggestions(): Suggestion[] {
   }, [top.data, recent.data]);
 }
 
-export function SuggestionChips({ className, compact }: { className?: string; compact?: boolean }) {
-  const suggestions = useSuggestions();
+export function SuggestionChips({ className, compact, tone = "light", limit }: { className?: string; compact?: boolean; tone?: "light" | "dark"; limit?: number }) {
+  const suggestions = useSuggestions().slice(0, limit ?? 99);
+  const dark = tone === "dark";
   const { setDraft } = useAssistant();
   return (
     <ul className={cn("grid gap-1.5", compact ? "grid-cols-1" : "sm:grid-cols-2", className)} aria-label="Suggested requests">
@@ -57,12 +58,12 @@ export function SuggestionChips({ className, compact }: { className?: string; co
           <button
             type="button"
             onClick={() => setDraft(s.prompt)}
-            className="group flex w-full items-start gap-2.5 rounded-md border border-line bg-surface px-3 py-2 text-left transition-colors hover:border-gentian-line hover:bg-gentian-soft/50"
+            className={cn("group flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-colors", dark ? "border-white/15 bg-white/5 hover:border-white/30 hover:bg-white/10" : "border-line bg-surface hover:border-gentian-line hover:bg-gentian-soft/50")}
           >
             <span className={cn("mt-[7px] size-1.5 shrink-0 rounded-full", s.kind === "write" ? "bg-signal" : "bg-gentian")} aria-hidden />
             <span className="min-w-0">
-              <span className="block text-[11.5px] text-ink-3">{s.label}{s.kind === "write" ? " · changes the CRM" : ""}</span>
-              <span className="block text-[13px] leading-snug text-ink">{s.prompt}</span>
+              <span className={cn("block text-[11.5px]", dark ? "text-white/50" : "text-ink-3")}>{s.label}{s.kind === "write" ? " · changes the CRM" : ""}</span>
+              <span className={cn("block text-[13px] leading-snug", dark ? "text-white" : "text-ink")}>{s.prompt}</span>
             </span>
           </button>
         </li>
@@ -73,7 +74,7 @@ export function SuggestionChips({ className, compact }: { className?: string; co
 
 // ---------- composer ----------
 
-export function Composer({ size = "md", autoFocus, className }: { size?: "md" | "lg"; autoFocus?: boolean; className?: string }) {
+export function Composer({ size = "md", autoFocus, className, tone = "light" }: { size?: "md" | "lg"; autoFocus?: boolean; className?: string; tone?: "light" | "dark" }) {
   const { pending, send, cancel, draft, setDraft, messages, reset } = useAssistant();
   const { user } = useCurrentUser();
   const [text, setText] = useState("");
@@ -134,7 +135,8 @@ export function Composer({ size = "md", autoFocus, className }: { size?: "md" | 
       ) : null}
       <div
         className={cn(
-          "flex items-end gap-2 rounded-lg border bg-surface transition-[border-color,box-shadow] focus-within:border-gentian focus-within:ring-2 focus-within:ring-gentian/20",
+          "flex items-end gap-2 rounded-lg border transition-[border-color,box-shadow] focus-within:ring-2",
+          tone === "dark" ? "border-white/20 bg-white/5 text-white focus-within:border-white/50 focus-within:ring-white/15 [&_button]:text-white [&_textarea]:text-white [&_textarea]:placeholder:text-white/40" : "bg-surface focus-within:border-gentian focus-within:ring-gentian/20",
           lg ? "border-line-strong p-2 shadow-card" : "border-line-strong p-1.5",
         )}
       >
@@ -172,7 +174,7 @@ export function Composer({ size = "md", autoFocus, className }: { size?: "md" | 
           </Button>
         )}
       </div>
-      <div className="mt-1.5 flex items-center justify-between gap-3 px-1 text-[11.5px] text-ink-3">
+      <div className={cn("mt-1.5 flex items-center justify-between gap-3 px-1 text-[11.5px]", tone === "dark" ? "text-white/45" : "text-ink-3")}>
         <span className="truncate">Enter to send · Shift+Enter for a new line · CSV attachments are read as Sinergia exports</span>
         {messages.length ? (
           <button type="button" onClick={reset} className="shrink-0 hover:text-ink">
