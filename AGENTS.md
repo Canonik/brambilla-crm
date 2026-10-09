@@ -50,7 +50,7 @@ The judge's **form check** exercises `/health`, `/__reset`, `/__migrate`, `/__ag
 | 4 Assistant evaluator | `agent/assistant-eval` | `tests/assistant-eval/`, R13 evaluation reports | Spend model credit without a plan: at most a few conversations per run, never in loops |
 | 5 Backend auditor | `agent/backend-audit` | `tests/backend-audit/`, backend correctness audit reports | Edit `server/` (report findings to Core via the coordinator) |
 | 6 Frontend integration | `agent/frontend-qa` | `tests/frontend-qa/`, frontend integration audit reports | Edit `frontend/` |
-| 7 Challenge intelligence | `agent/challenge-intel` | `docs/research/challenge-intelligence.md`, official-source research | Change contracts |
+| 7 Challenge intelligence | `agent/challenge-intelligence` | `docs/research/challenge-intelligence.md`, official-source research | Change contracts |
 | 8 Interpretability researcher | `agent/assistant-evidence` | `experiments/assistant-evidence/` and its docs | Add a separate AI feature; claim activation-level inspection |
 
 Create your worktree only if it does not exist yet: `git worktree list`, then
