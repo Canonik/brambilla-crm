@@ -1,0 +1,268 @@
+{
+  "backend_root": "/tmp/brambilla-score-restart-fix/server",
+  "schema": "score_volume_196bad82e97346ecb9f9cc42dd83d314",
+  "transport": "real loopback HTTP / uvicorn subprocess / local PostgreSQL",
+  "archive_bytes": 20559135,
+  "archive_sha256": "488998aaf337ea01a1c9a5de0ad08f892b0473de53e5d7b4796b05ca3c5b4571",
+  "source_commit": "3eef9eb73370fabc02d4875bfc9faf45a5befb3e",
+  "candidate_baseline_commit": null,
+  "tracked_backend_clean": false,
+  "source_sha256": {
+    "app/defaults.py": "eeef6d99e6ecb2efcf8e8c074927c7fd03ca284c6238c84b9593c0a77e54f224",
+    "app/util.py": "66d114156dc4de5a259144970ff5fac2d6f680d2fcd1af61fff5854858aeb284",
+    "app/store.py": "4715126ec8efcafb2434eb8de3a8a6e8524967a749695cc8fe5e56ad77781a07",
+    "app/search.py": "7f03d812db776c5da713701d81740b48fcf0dce88b291467d68ab2fe12d49ae1",
+    "app/schema.sql": "b6e0f1f7297926b109c68ce8373d0ab766841efa1d3cdd06a7d278a613b639d0",
+    "app/rules.py": "33e8e3cdc136a6e02364cf86bff59e1f13dd188fdff24133aa7452ee977e7d71",
+    "app/pipelines.py": "f591e7a6cb6a5fab448fa6e0dcd78fdea02af61d8d0d45c5c24697c3607b7300",
+    "app/main.py": "1d28bcedaa36323d798f36ef1bf181c817b19db67fbe3b7f944cce486c1634e6",
+    "app/errors.py": "a0e785cff692c32e3695e032e76534ff7978fc1b60ae1491cbddd3c0ff6507f7",
+    "app/db.py": "ac884428cc26c6611566a1a164774e30a01b3fa0903175c665dd6ddc652a2265",
+    "app/config.py": "aac9d7da3e08073c6e6262fddada8de6a658d7c3acefc293efe1ed53becc34c9",
+    "app/brambilla.py": "fce5b6c2051fed8003b54fade60a7de7f3b57525635c90b44895ca185c70bfcc",
+    "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/routers/admin.py": "8497d0f0ed7f264bb53826cd461ce60a914f02ff3b770d5a6a55d0b48224e6f6",
+    "app/routers/properties.py": "d30fccc068d8ebb3335d555b13154a61f834c6ea5ed6df9a14459d17e32a5704",
+    "app/routers/pipelines.py": "7d782fe868f4f3584a60a596e325d4f35eade9d634269c3ee9791cc6cdcf65b5",
+    "app/routers/owners.py": "208928ee9193e82d580c472ab10a9183056aaf60541c6845816d08c4f10b9e01",
+    "app/routers/objects.py": "650cfbf6e65486440f9f56398ab750fdc4469d035f07be0b8bc5186afa7cba54",
+    "app/routers/lists.py": "51bfb0c579ac449b51ac0d7f2ca5bae768db8e9da1e105897b2af09b8f7f1e47",
+    "app/routers/imports.py": "eba1fdcafa3dc07d2a161303b6f1c344edf28d99cb394fb962cbba6d16a94ac1",
+    "app/routers/exports.py": "bc5421fc7a0022b73b59be238d2df18bb065c27cfeb8f93f5e7346fd5d64bd0a",
+    "app/routers/common.py": "5b2404b8a77d2822e368d8c42a72d8af98842b8a3d65079f80bc2d21821d3c33",
+    "app/routers/associations.py": "970b3f6d07a08c8cc0470a1272cd2e7aed3f58cf0e76b28adea017b6d25ba912",
+    "app/routers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/migration/parse.py": "0a94376301bce0828ea56670487deb4d0e9b4e0ef3807ddcefda34c665c00920",
+    "app/migration/importer.py": "ac068150ad11940e45edc5cb17b13915d229988bc1baac3d349a9b3bc6d18faf",
+    "app/migration/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "app/assistant/tools.py": "ebe5afdf409d890197790f619c9c31d489351b49b2379a730ecfb0ff87996d9c",
+    "app/assistant/agent.py": "b3825f71259bbb6fc94ac7baf2b4a7adcd6d8db04acffbb4823d44f2aa50afe4",
+    "app/assistant/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "postgres": "PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+  "migration": {
+    "http_status": 204,
+    "seconds_http_total": 28.3381,
+    "response_bytes": 0,
+    "metadata": {
+      "calls": 107761,
+      "deals": 33577,
+      "notes": 143410,
+      "emails": 72232,
+      "source": "http://127.0.0.1:46009/archive?sample=1",
+      "classes": {
+        "-": 17244,
+        "A": 52,
+        "B": 25,
+        "C": 65
+      },
+      "records": 538354,
+      "tickets": 21329,
+      "contacts": 63710,
+      "meetings": 36200,
+      "products": 1735,
+      "companies": 17386,
+      "line_items": 41014,
+      "righe_rows": 42736,
+      "migrated_at": "2026-10-09T09:49:58.610Z",
+      "ticket_rows": 22000,
+      "associations": 1666162,
+      "aziende_rows": 20497,
+      "listino_rows": 1922,
+      "attivita_rows": 370316,
+      "contatti_rows": 73391,
+      "seconds_build": 16.3,
+      "seconds_total": 26.8,
+      "ticket_deleted": 671,
+      "aziende_deleted": 799,
+      "seconds_indexes": 2.7,
+      "attivita_deleted": 10713,
+      "contatti_deleted": 2802,
+      "opportunita_rows": 35020,
+      "seconds_download": 0.1,
+      "dormant_companies": 936,
+      "deals_unknown_stage": 0,
+      "opportunita_deleted": 1443,
+      "seconds_copy_assocs": 1.7,
+      "contacts_merged_rows": 6879,
+      "seconds_copy_objects": 3.4,
+      "attivita_unknown_type": 0,
+      "companies_merged_rows": 2312,
+      "deals_amount_unparsed": 0,
+      "lines_without_product": 2080,
+      "deals_owner_unresolved": 0,
+      "deals_amount_from_lines": 11659,
+      "lines_price_from_listino": 2640,
+      "contacts_auto_associated_r12": 2955,
+      "deals_closedate_from_history": 2656,
+      "tickets_contact_from_da_line": 456,
+      "contacts_merged_by_name_company": 721
+    }
+  },
+  "associations": 1666162,
+  "dormant_members": 936,
+  "before_restart": {
+    "counts": {
+      "calls": 107761,
+      "companies": 17386,
+      "contacts": 63710,
+      "deals": 33577,
+      "emails": 72232,
+      "line_items": 41014,
+      "meetings": 36200,
+      "notes": 143410,
+      "products": 1735,
+      "tickets": 21329
+    },
+    "id_legacy_property_definitions": 9,
+    "partita_iva": {
+      "name": "partita_iva",
+      "type": "string",
+      "label": "Partita IVA",
+      "hidden": false,
+      "options": [],
+      "archived": false,
+      "createdAt": "2026-10-09T09:49:58.612Z",
+      "fieldType": "text",
+      "formField": false,
+      "groupName": "companyinformation",
+      "updatedAt": "2026-10-09T09:49:58.612Z",
+      "calculated": false,
+      "description": "",
+      "displayOrder": -1,
+      "hasUniqueValue": true,
+      "hubspotDefined": false,
+      "externalOptions": false,
+      "modificationMetadata": {
+        "archivable": true,
+        "readOnlyValue": false,
+        "readOnlyDefinition": false
+      }
+    },
+    "pipelines": [
+      "Rinnovi",
+      "Sales Pipeline",
+      "Support Pipeline",
+      "Assistenza"
+    ],
+    "lists": [
+      "Clienti dormienti"
+    ]
+  },
+  "migration_process_memory": {
+    "VmPeak_KiB": 2256612,
+    "VmSize_KiB": 751728,
+    "VmHWM_KiB": 1917860,
+    "VmRSS_KiB": 360732
+  },
+  "reads": {
+    "clients": 20,
+    "requests": 200,
+    "seconds_wall": 0.4667,
+    "p50_ms": 44.411,
+    "p95_ms": 53.758,
+    "max_ms": 57.468,
+    "correct_responses": 200,
+    "status_counts": {
+      "200": 200
+    },
+    "over_one_second": 0,
+    "object_types_sampled": [
+      "calls",
+      "companies",
+      "contacts",
+      "deals",
+      "emails",
+      "line_items",
+      "meetings",
+      "notes",
+      "products",
+      "tickets"
+    ]
+  },
+  "after_reads_process_memory": {
+    "VmPeak_KiB": 2256612,
+    "VmSize_KiB": 1531372,
+    "VmHWM_KiB": 1917860,
+    "VmRSS_KiB": 329652
+  },
+  "after_restart": {
+    "counts": {
+      "calls": 107761,
+      "companies": 17386,
+      "contacts": 63710,
+      "deals": 33577,
+      "emails": 72232,
+      "line_items": 41014,
+      "meetings": 36200,
+      "notes": 143410,
+      "products": 1735,
+      "tickets": 21329
+    },
+    "id_legacy_property_definitions": 9,
+    "partita_iva": {
+      "name": "partita_iva",
+      "type": "string",
+      "label": "Partita IVA",
+      "hidden": false,
+      "options": [],
+      "archived": false,
+      "createdAt": "2026-10-09T09:49:58.612Z",
+      "fieldType": "text",
+      "formField": false,
+      "groupName": "companyinformation",
+      "updatedAt": "2026-10-09T09:49:58.612Z",
+      "calculated": false,
+      "description": "",
+      "displayOrder": -1,
+      "hasUniqueValue": true,
+      "hubspotDefined": false,
+      "externalOptions": false,
+      "modificationMetadata": {
+        "archivable": true,
+        "readOnlyValue": false,
+        "readOnlyDefinition": false
+      }
+    },
+    "pipelines": [
+      "Rinnovi",
+      "Sales Pipeline",
+      "Support Pipeline",
+      "Assistenza"
+    ],
+    "lists": [
+      "Clienti dormienti"
+    ]
+  },
+  "after_restart_process_memory": {
+    "VmPeak_KiB": 543336,
+    "VmSize_KiB": 477816,
+    "VmHWM_KiB": 67732,
+    "VmRSS_KiB": 67732
+  },
+  "restart": {
+    "records_preserved": true,
+    "id_legacy_definitions_preserved": true,
+    "partita_iva_preserved": true,
+    "pipelines_preserved": true,
+    "lists_preserved": true
+  },
+  "reset": {
+    "http_status": 204,
+    "response_bytes": 0,
+    "seconds": 0.2638,
+    "remaining_associations": 0,
+    "remaining_memberships": 0
+  },
+  "after_reset": {
+    "counts": {},
+    "id_legacy_property_definitions": 0,
+    "partita_iva": null,
+    "pipelines": [
+      "Sales Pipeline",
+      "Support Pipeline"
+    ],
+    "lists": []
+  },
+  "own_schema_removed": true
+}

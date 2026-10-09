@@ -77,9 +77,8 @@ def read_export(data: bytes) -> dict[str, list[dict]]:
         text = raw.decode("cp1252", "surrogateescape")
         if text.startswith("﻿"):
             text = text[1:]
-        sample = text[:4096]
-        delimiter = ";" if sample.count(";") >= sample.count(",") else ","
-        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
+        # Sinergia specifies semicolons; punctuation in text cannot select a dialect.
+        reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=";")
         rows = []
         for i, r in enumerate(reader):
             d = {(k or "").strip().lower(): (v if isinstance(v, str) else "") for k, v in r.items() if k is not None}
@@ -729,6 +728,7 @@ def run_migration(url: str) -> dict:
         m.build_tickets(ticket_pl)
         m.build_activities()
         m.compute_revenue()
+        files.clear()  # Release raw CSV rows before ID/association/COPY allocation.
         t_build = time.time() - t0
         # ids
         start = int(conn.execute("SELECT nextval('objects_id_seq') AS v").fetchone()["v"])

@@ -402,10 +402,11 @@ def inverse_type_id(type_id: int) -> int | None:
 
 
 # ---------------------------------------------------------------- bootstrap
-def ensure_defaults(conn=None) -> None:
+def ensure_defaults(conn=None, *, reset: bool = False) -> None:
+    """Seed missing defaults at startup; replace metadata only for an explicit reset."""
     if conn is None:
         with db.connection() as c:
-            ensure_defaults(c)
+            ensure_defaults(c, reset=reset)
             c.commit()
         return
     ts = now_iso()
@@ -416,15 +417,18 @@ def ensure_defaults(conn=None) -> None:
             d["createdAt"] = ts
             d["updatedAt"] = ts
             rows.append((ot, p["name"], json.dumps(d)))
-    conn.execute("DELETE FROM properties")
-    conn.cursor().executemany("INSERT INTO properties (object_type, name, definition) VALUES (%s, %s, %s::jsonb)", rows)
+    if reset:
+        conn.execute("DELETE FROM properties")
+    conn.cursor().executemany("INSERT INTO properties (object_type, name, definition) VALUES (%s, %s, %s::jsonb) ON CONFLICT (object_type, name) DO NOTHING", rows)
     grows = []
     for ot, groups in DEFAULT_GROUPS.items():
         for i, (name, label) in enumerate(groups):
             grows.append((ot, name, json.dumps({"name": name, "label": label, "displayOrder": i, "archived": False})))
-    conn.execute("DELETE FROM property_groups")
-    conn.cursor().executemany("INSERT INTO property_groups (object_type, name, definition) VALUES (%s, %s, %s::jsonb)", grows)
-    conn.execute("DELETE FROM pipelines")
+    if reset:
+        conn.execute("DELETE FROM property_groups")
+    conn.cursor().executemany("INSERT INTO property_groups (object_type, name, definition) VALUES (%s, %s, %s::jsonb) ON CONFLICT (object_type, name) DO NOTHING", grows)
+    if reset:
+        conn.execute("DELETE FROM pipelines")
     for ot, pls in default_pipelines().items():
         for pl in pls:
             pl = json.loads(json.dumps(pl))
@@ -433,9 +437,10 @@ def ensure_defaults(conn=None) -> None:
             for s in pl["stages"]:
                 s["createdAt"] = ts
                 s["updatedAt"] = ts
-            conn.execute("INSERT INTO pipelines (object_type, id, definition) VALUES (%s, %s, %s::jsonb)", (ot, pl["id"], json.dumps(pl)))
-    conn.execute("DELETE FROM association_labels")
+            conn.execute("INSERT INTO pipelines (object_type, id, definition) VALUES (%s, %s, %s::jsonb) ON CONFLICT (object_type, id) DO NOTHING", (ot, pl["id"], json.dumps(pl)))
+    if reset:
+        conn.execute("DELETE FROM association_labels")
     conn.cursor().executemany(
-        "INSERT INTO association_labels (type_id, from_type, to_type, label, name, category, inverse_type_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        "INSERT INTO association_labels (type_id, from_type, to_type, label, name, category, inverse_type_id) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (type_id) DO NOTHING",
         [(t[0], t[1], t[2], t[3], t[4], "USER_DEFINED" if t[0] in (901, 902) else "HUBSPOT_DEFINED", t[5]) for t in HUBSPOT_ASSOCIATION_TYPES],
     )

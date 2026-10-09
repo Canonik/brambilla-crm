@@ -46,10 +46,20 @@ def _coerce(value, ptype: str, name: str):
 
 
 def _filter_sql(store, object_type: str, f: dict, params: list) -> str:
+    if not isinstance(f, dict):
+        raise validation("filters must be objects")
     name = f.get("propertyName")
-    op = (f.get("operator") or "").upper()
+    operator = f.get("operator")
+    if not isinstance(name, str) or not isinstance(operator, str):
+        raise validation("filters require string propertyName and operator")
+    op = operator.upper()
     if not name or not op:
         raise validation("filters require propertyName and operator")
+    if op in ("EQ", "NEQ", "LT", "LTE", "GT", "GTE", "BETWEEN", "CONTAINS_TOKEN", "NOT_CONTAINS_TOKEN"):
+        if "value" not in f or f["value"] is None:
+            raise validation(f"operator {op} requires value")
+    if op == "BETWEEN" and ("highValue" not in f or f["highValue"] is None):
+        raise validation("operator BETWEEN requires highValue")
     if name.startswith("associations."):
         target = defaults.resolve_type(name.split(".", 1)[1])
         if target is None:
@@ -76,7 +86,7 @@ def _filter_sql(store, object_type: str, f: dict, params: list) -> str:
         ptype = "number"
     expr = _typed_expr(name, ptype)
     raw = f"(properties->>{_lit(name)})"
-    is_text = ptype not in ("number", "datetime", "date", "bool")
+    is_text = ptype not in ("number", "datetime", "date", "bool", "enumeration")
     if op in ("EQ", "NEQ"):
         if "value" not in f:
             raise validation(f"operator {op} requires value")
@@ -126,7 +136,7 @@ def _filter_sql(store, object_type: str, f: dict, params: list) -> str:
         if "*" in v:
             regex = r"(^|\s)" + pat + r"($|\s)"
         params.append(regex)
-        cond = f"{raw} ~* %s"
+        cond = f"{raw} {'~' if ptype == 'enumeration' else '~*'} %s"
         if op == "CONTAINS_TOKEN":
             return cond
         return f"NOT ({cond} AND {raw} IS NOT NULL)"
@@ -141,11 +151,19 @@ def build_where(store, object_type: str, body: dict, params: list) -> str:
         groups = [{"filters": body["filters"]}]
     if not isinstance(groups, list):
         raise validation("filterGroups must be a list")
-    if len(groups) > 6:
-        raise validation("filterGroups cannot have more than 6 groups")
+    if len(groups) > 5:
+        raise validation("filterGroups cannot have more than 5 groups")
     group_sql = []
+    total_filters = 0
     for g in groups:
+        if not isinstance(g, dict):
+            raise validation("filterGroups must contain objects")
         fs = g.get("filters") or []
+        if not isinstance(fs, list):
+            raise validation("filters must be a list")
+        total_filters += len(fs)
+        if total_filters > 18:
+            raise validation("search cannot have more than 18 filters")
         if len(fs) > 6:
             raise validation("a filter group cannot have more than 6 filters")
         parts = [_filter_sql(store, object_type, f, params) for f in fs]
@@ -156,10 +174,12 @@ def build_where(store, object_type: str, body: dict, params: list) -> str:
     q = body.get("query")
     if q is not None and str(q).strip() != "":
         q = str(q).strip()
+        # ILIKE metacharacters are literal text in the public query field.
+        pattern = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         fields = defaults.OBJECT_TYPES[object_type]["search"]
         parts = []
         for fld in fields:
-            params.append(f"%{q}%")
+            params.append(f"%{pattern}%")
             parts.append(f"(properties->>{_lit(fld)}) ILIKE %s")
         if q.isdigit():
             params.append(int(q))
@@ -211,6 +231,8 @@ def build_search(store, object_type: str, body: dict) -> dict:
         offset = int(after)
     except (TypeError, ValueError):
         raise validation("after must be an integer offset")
+    if offset < 0:
+        raise validation("after must be a nonnegative integer offset")
     params: list = []
     where = build_where(store, object_type, body, params)
     order = build_order(store, object_type, body.get("sorts"))
