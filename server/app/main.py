@@ -116,9 +116,11 @@ def _startup():
 
 
 app.include_router(admin.router)
-app.include_router(objects.router)
+app.include_router(objects.router, prefix="/crm/v3/objects")
+app.include_router(objects.router, prefix=f"/crm/objects/{config.API_VERSION}")
 app.include_router(associations.router)
-app.include_router(properties.router)
+app.include_router(properties.router, prefix="/crm/v3/properties")
+app.include_router(properties.router, prefix=f"/crm/properties/{config.API_VERSION}")
 app.include_router(pipelines.router)
 app.include_router(lists.router)
 app.include_router(owners.router)

@@ -219,7 +219,8 @@ def build_search(store, object_type: str, body: dict) -> dict:
     props = body.get("properties")
     if props is not None and not isinstance(props, list):
         raise validation("properties must be a list")
-    results = [record_out(r, props, object_type) for r in rows]
+    readable = store.readable_properties(object_type, props)
+    results = [record_out(r, readable, object_type) for r in rows]
     assoc = body.get("associations")
     if assoc:
         for r, row in zip(results, rows):
