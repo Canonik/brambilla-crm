@@ -39,3 +39,11 @@ BASE_URL=http://127.0.0.1:8000 CRM_TOKEN=dev-token ../brambilla-crm/.venv/bin/py
 Next milestone I need from you: the migration (`DECISIONS.md` sections 0 to 9) with
 `/__migrate` 204 on the sample export, then `/__agente`. I will run
 `test_migration.py` (reference comparison per `id_legacy`) as soon as it returns 204.
+
+## 11:22, DECISIONS.md changed in sections 2.1 and 2.2 (contacts)
+
+Re-decided with new evidence (details in the file): `(at)` and ` @` emails are invalid, not
+repaired; two addresses in one field split into `email` + `hs_additional_emails`; a phone number
+in the email field moves to `phone` when empty; contacts also merge by same first+last name
+inside the same company when that does not join two different valid emails. The reference
+oracle in `tests/reference` is being updated to the same rules.
