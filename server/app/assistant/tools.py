@@ -766,14 +766,45 @@ class ToolContext:
     def pipelines(self, store: Store):
         return {ot: [{"id": p["id"], "label": p["label"], "stages": [{"id": s["id"], "label": s["label"], **({k: v for k, v in s.get("metadata", {}).items()})} for s in p["stages"]]} for p in store.pipelines(ot)] for ot in ("deals", "tickets")}
 
-    def dormant_list(self, store: Store, limit=25):
+    def dormant_list(self, store: Store, limit=25, user_email=None, mine=None):
         row = store.conn.execute("SELECT list_id, definition FROM lists WHERE lower(definition->>'name') = 'clienti dormienti' ORDER BY list_id DESC LIMIT 1").fetchone()
         if not row:
             return {"error": "la lista Clienti dormienti non esiste"}
         lid = row["list_id"]
-        total = store.conn.execute("SELECT count(*) AS n FROM list_memberships WHERE list_id = %s", (lid,)).fetchone()["n"]
-        rows = store.conn.execute("SELECT o.* FROM list_memberships m JOIN objects o ON o.id = m.record_id WHERE m.list_id = %s ORDER BY o.properties->>'name' LIMIT %s", (lid, min(int(limit or 25), 100))).fetchall()
-        return {"list_id": str(lid), "total": total, "results": [self._company_brief(store, r) for r in rows]}
+        email = None
+        if user_email or mine:
+            email = (self._user_filter(store, user_email) or self.user_email or "").strip().lower() if user_email else (self.user_email or "").strip().lower()
+            if not email:
+                return {"error": "utente non indicato"}
+        won = [s["id"] for p in store.pipelines("deals") for s in p["stages"]
+               if str((s.get("metadata") or {}).get("isClosed")).lower() == "true" and float((s.get("metadata") or {}).get("probability") or 0) >= 1.0]
+        mine_sql = ""
+        params: list = [lid]
+        if email:
+            mine_sql = """ AND m.record_id IN (SELECT a.to_id FROM objects d JOIN associations a ON a.from_id = d.id AND a.to_type = 'companies'
+                WHERE NOT d.archived AND ((d.object_type = 'deals' AND d.properties->>'commerciale' = %s) OR (d.object_type = 'tickets' AND d.properties->>'assegnatario' = %s)))"""
+            params += [email, email]
+        total = store.conn.execute("SELECT count(*) AS n FROM list_memberships m WHERE m.list_id = %s" + mine_sql, params).fetchone()["n"]
+        rows = store.conn.execute(
+            "SELECT o.* FROM list_memberships m JOIN objects o ON o.id = m.record_id WHERE m.list_id = %s" + mine_sql + " ORDER BY o.properties->>'name' LIMIT %s",
+            params + [min(int(limit or 25), 100)]).fetchall()
+        results = []
+        for r in rows:
+            item = self._company_brief(store, r)
+            last = store.conn.execute(
+                """SELECT d.id, d.properties->>'dealname' AS name, d.properties->>'amount' AS amount, d.properties->>'deal_currency_code' AS cur,
+                          d.properties->>'closedate' AS closedate, d.properties->>'commerciale' AS commerciale
+                   FROM associations a JOIN objects d ON d.id = a.to_id AND d.object_type = 'deals' AND NOT d.archived
+                   WHERE a.from_id = %s AND a.to_type = 'deals' AND d.properties->>'dealstage' = ANY(%s)
+                   ORDER BY d.properties->>'closedate' DESC NULLS LAST LIMIT 1""", (r["id"], won)).fetchone() if won else None
+            if last:
+                item["ultima_trattativa_vinta"] = {"id": str(last["id"]), "dealname": last["name"], "amount": last["amount"], "currency": last["cur"] or "EUR",
+                                                   "closedate": (last["closedate"] or "")[:10], "commerciale": last["commerciale"]}
+            results.append(item)
+        out = {"list_id": str(lid), "total": total, "results": results}
+        if email:
+            out["user"] = email
+        return out
 
     # ---------------------------------------------------------- write tools
     def create_record(self, store: Store, object_type: str, properties: dict, associations: list | None = None):
@@ -965,7 +996,7 @@ TOOL_SCHEMAS = [
     _schema("my_customers", "Le aziende seguite da un utente: quelle con trattative di cui è commerciale o ticket di cui è assegnatario. Default: l'utente che scrive.", {"user_email": S("email utente (default chi scrive)"), "limit": I("max risultati")}),
     _schema("list_users", "Utenti Brambilla (commerciali) attivi con email, ruolo e responsabile. Usalo per risolvere nomi di colleghi in email.", {"query": S("nome o parte"), "active_only": B("default true")}),
     _schema("pipelines", "Pipeline e fasi (id ed etichette) di trattative e ticket.", {}),
-    _schema("dormant_list", "Membri della lista Clienti dormienti.", {"limit": I("max risultati")}),
+    _schema("dormant_list", "Membri della lista Clienti dormienti, ciascuno con la sua ultima trattativa vinta. Per 'i miei clienti dormienti' usa mine=true (clienti seguiti da chi scrive: sue trattative o suoi ticket) oppure user_email per un collega. total = numero esatto di membri del filtro.", {"limit": I("max risultati (max 100)"), "mine": {"type": "boolean", "description": "solo i clienti di chi scrive"}, "user_email": S("email o nome del collega")}),
     _schema("create_record", "Crea un record. Per contacts: firstname, lastname, email, phone, lifecyclestage. Per companies: name, domain, city, state, partita_iva. Per deals: dealname, amount, deal_currency_code, pipeline, dealstage (etichetta o id), closedate, commerciale. Per tickets: subject, content, hs_pipeline_stage, hs_ticket_priority, assegnatario. Per notes/calls/emails/meetings: hs_note_body/hs_call_body/hs_email_text/hs_meeting_body, hs_timestamp. Per tasks: hs_task_subject, hs_timestamp, hs_task_status. associations: [{object_type, id}].", {"object_type": S("tipo"), "properties": {"type": "object", "description": "proprietà"}, "associations": {"type": "array", "items": {"type": "object", "properties": {"object_type": S("tipo"), "id": S("id")}}, "description": "record da associare"}}, ["object_type", "properties"]),
     _schema("update_record", "Aggiorna proprietà di un record esistente (es. dealstage 'Vinta' per segnare vinta, amount, closedate, hs_pipeline_stage per i ticket).", {"object_type": S("tipo"), "id": S("id"), "properties": {"type": "object", "description": "proprietà da modificare"}}, ["object_type", "id", "properties"]),
     _schema("associate", "Associa due record (es. contatto ad azienda, trattativa a contatto).", {"from_type": S("tipo"), "from_id": S("id"), "to_type": S("tipo"), "to_id": S("id")}, ["from_type", "from_id", "to_type", "to_id"]),
