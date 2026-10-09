@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+
+import psycopg
 from fastapi import APIRouter, Request, Response
+from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from .. import db, defaults
@@ -50,11 +54,40 @@ def build_definition(object_type: str, body: dict, *, hubspot_defined: bool = Fa
     }
 
 
+# These two already have dedicated unique indexes in schema.sql.
+_BUILTIN_UNIQUE = {("contacts", "email"), ("companies", "partita_iva")}
+
+
+def _unique_index_name(object_type: str, name: str) -> str:
+    return "objects_uq_" + hashlib.md5(f"{object_type}:{name}".encode()).hexdigest()[:16]
+
+
+def ensure_unique_index(conn, object_type: str, name: str) -> None:
+    """Enforce hasUniqueValue with a partial unique index on the property's value."""
+    if (object_type, name) in _BUILTIN_UNIQUE:
+        return
+    stmt = sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON objects ((properties->>{})) WHERE object_type = {} AND NOT archived AND properties ? {}").format(
+        sql.Identifier(_unique_index_name(object_type, name)), sql.Literal(name), sql.Literal(object_type), sql.Literal(name))
+    try:
+        with conn.transaction():
+            conn.execute(stmt)
+    except psycopg.errors.UniqueViolation:
+        raise validation(f"Cannot make {name} unique: existing {object_type} already share a value for it")
+
+
+def drop_unique_index(conn, object_type: str, name: str) -> None:
+    conn.execute(sql.SQL("DROP INDEX IF EXISTS {}").format(sql.Identifier(_unique_index_name(object_type, name))))
+
+
 def create_property(conn, object_type: str, body: dict, *, replace: bool = False) -> dict:
     d = build_definition(object_type, body)
     existing = conn.execute("SELECT 1 FROM properties WHERE object_type = %s AND name = %s", (object_type, d["name"])).fetchone()
     if existing and not replace:
         raise validation(f"Property {d['name']} already exists", [{"isValid": False, "message": "Property already exists", "error": "PROPERTY_EXISTS", "name": d["name"]}])
+    if d["hasUniqueValue"]:
+        ensure_unique_index(conn, object_type, d["name"])
+    elif existing:
+        drop_unique_index(conn, object_type, d["name"])
     conn.execute(
         "INSERT INTO properties (object_type, name, definition) VALUES (%s, %s, %s) ON CONFLICT (object_type, name) DO UPDATE SET definition = EXCLUDED.definition",
         (object_type, d["name"], Jsonb(d)),
@@ -117,6 +150,8 @@ async def batch_archive_properties(object_type: str, request: Request):
     body = await json_body(request)
     names = [i.get("name") for i in batch_inputs(body) if isinstance(i.get("name"), str)]
     with db.connection() as conn:
+        for n in names:
+            drop_unique_index(conn, ot, n)
         conn.execute("DELETE FROM properties WHERE object_type = %s AND name = ANY(%s) AND NOT (definition->>'hubspotDefined')::boolean", (ot, names))
         conn.commit()
     invalidate_caches()
@@ -221,6 +256,7 @@ def delete_property(object_type: str, property_name: str):
             raise not_found(f"Property {property_name} does not exist")
         if row["definition"].get("hubspotDefined"):
             raise validation(f"Property {property_name} is HubSpot defined and cannot be deleted")
+        drop_unique_index(conn, ot, property_name)
         conn.execute("DELETE FROM properties WHERE object_type = %s AND name = %s", (ot, property_name))
         conn.commit()
     invalidate_caches()

@@ -47,6 +47,11 @@ def record_out(row, properties: list[str] | None, object_type: str, *, all_props
     return out
 
 
+def properties_written(props: dict) -> dict:
+    """On create the normalized properties are exactly what the request wrote."""
+    return props
+
+
 class Store:
     def __init__(self, conn: psycopg.Connection, now: dt.datetime | None = None):
         self.conn = conn
@@ -294,6 +299,8 @@ class Store:
                 out["closed_date"] = iso(self.now)
 
     def _normalize_line_item(self, out: dict, existing: dict | None) -> None:
+        if existing is None and "quantity" not in out:
+            out["quantity"] = "1"
         merged = dict(existing or {})
         merged.update(out)
         q = merged.get("quantity")
@@ -379,6 +386,9 @@ class Store:
             props["hs_ticket_id"] = str(id_)
         if object_type == "contacts":
             props["hs_full_name_or_email"] = (" ".join(x for x in (props.get("firstname"), props.get("lastname")) if x) or props.get("email") or "")
+        if object_type == "deals":
+            # before the insert: it stamps closedate and the closed-won/lost dates into props
+            self._deal_stage_dates(id_, None, props.get("dealstage"), props, written=properties_written(props))
         try:
             with self.conn.transaction():
                 self.conn.execute(
@@ -389,8 +399,6 @@ class Store:
             raise self._unique_conflict(object_type, props, e)
         if object_type == "companies":
             self._sync_company_domains(id_, props)
-        if object_type == "deals":
-            self._deal_stage_dates(id_, None, props.get("dealstage"), props)
         for a in associations or []:
             self._apply_association_payload(object_type, id_, a)
         if run_rules:
@@ -407,6 +415,8 @@ class Store:
         if "objects_company_piva_uq" in msg:
             ex = self.conn.execute("SELECT id FROM objects WHERE object_type='companies' AND NOT archived AND properties->>'partita_iva' = %s", (props.get("partita_iva"),)).fetchone()
             return conflict(f"Company with partita_iva {props.get('partita_iva')} already exists. Existing ID: {ex['id'] if ex else 'unknown'}")
+        if "objects_uq_" in msg:
+            return conflict("A record with the same value for a unique property already exists")
         return conflict("Record already exists")
 
     def update(self, object_type: str, id_value, properties: dict, id_property: str | None = None, *, run_rules: bool = True) -> dict:
@@ -428,7 +438,7 @@ class Store:
         if object_type == "contacts":
             new["hs_full_name_or_email"] = (" ".join(x for x in (new.get("firstname"), new.get("lastname")) if x) or new.get("email") or "")
         if object_type == "deals" and old.get("dealstage") != new.get("dealstage"):
-            self._deal_stage_dates(id_, old.get("dealstage"), new.get("dealstage"), new)
+            self._deal_stage_dates(id_, old.get("dealstage"), new.get("dealstage"), new, written=props)
         try:
             with self.conn.transaction():
                 self.conn.execute("UPDATE objects SET properties = %s, updated_at = %s WHERE id = %s", (Jsonb(new), now, id_))
@@ -442,7 +452,8 @@ class Store:
         row = self._row(object_type, id_)
         return record_out(row, None, object_type)
 
-    def _deal_stage_dates(self, id_: int, old_stage, new_stage, props: dict) -> None:
+    def _deal_stage_dates(self, id_: int, old_stage, new_stage, props: dict, written: dict | None = None) -> None:
+        """Closing dates. `props` is the full new state; `written` is what this request set."""
         look = self.stage_lookup("deals", new_stage) if new_stage else None
         if not look:
             return
@@ -451,7 +462,9 @@ class Store:
         if not closed:
             return
         won = float(meta.get("probability") or 0) >= 1.0
-        if not props.get("closedate"):
+        # entering a closed stage stamps the request clock unless this very write gave a close date
+        given = (written if written is not None else props).get("closedate")
+        if not given:
             props["closedate"] = iso(self.now)
         if won:
             props["hs_closed_won_date"] = iso(self.now)
