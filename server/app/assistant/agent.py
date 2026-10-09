@@ -11,6 +11,7 @@ import httpx
 from .. import config, db
 from ..store import Store
 from ..util import UTC, parse_datetime, utcnow
+from .evidence import EvidenceTrace
 from .tools import TOOL_SCHEMAS, ToolContext, run_tool
 
 log = logging.getLogger("crm.assistant")
@@ -157,13 +158,18 @@ def _tool_result_text(result) -> str:
     return s
 
 
-def handle_conversation(body: dict) -> str:
+def handle_conversation(body: dict, *, include_trace: bool = False) -> str | tuple[str, dict | None]:
     t0 = time.time()
     if not isinstance(body, dict):
         body = {}
     msgs, now, user_email = build_messages(body)
+    observer = EvidenceTrace(include_trace)
+
+    def finish(reply: str):
+        return (reply, observer.snapshot()) if include_trace else reply
+
     if len(msgs) == 1:
-        return "Ciao! Dimmi cosa ti serve dal CRM: posso cercare aziende, contatti, trattative e ticket, aggiornarli o rispondere a domande sui dati."
+        return finish("Ciao! Dimmi cosa ti serve dal CRM: posso cercare aziende, contatti, trattative e ticket, aggiornarli o rispondere a domande sui dati.")
     tctx = ToolContext(now, user_email)
     last_error = None
     for round_no in range(MAX_ROUNDS):
@@ -185,7 +191,7 @@ def handle_conversation(body: dict) -> str:
         content = msg.get("content") or ""
         if not tool_calls:
             if content.strip():
-                return content.strip()
+                return finish(content.strip())
             last_error = RuntimeError("empty reply")
             break
         assistant_msg = {"role": "assistant", "content": content or None, "tool_calls": []}
@@ -204,13 +210,13 @@ def handle_conversation(body: dict) -> str:
             if args is None:
                 result = {"error": "argomenti non in formato JSON valido"}
             else:
-                result = run_tool(tctx, name, args)
+                result = run_tool(tctx, name, args, observer=observer)
             log.info("tool %s(%s) -> %s", name, json.dumps(args, ensure_ascii=False)[:200], _tool_result_text(result)[:160])
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": _tool_result_text(result)})
     # out of rounds / budget / model failure: never claim more than what was done
     done = tctx.writes
     if done:
-        return "Ho eseguito queste operazioni nel CRM: " + "; ".join(done) + ". Non sono riuscito a completare il resto della richiesta nel tempo disponibile: dimmi se vuoi che continui."
+        return finish("Ho eseguito queste operazioni nel CRM: " + "; ".join(done) + ". Non sono riuscito a completare il resto della richiesta nel tempo disponibile: dimmi se vuoi che continui.")
     if last_error is not None:
-        return "Mi dispiace, in questo momento non riesco a contattare il modello o a completare l'operazione. Non ho modificato nulla nel CRM: riprova tra poco o riformula la richiesta."
-    return "Non sono riuscito a completare la richiesta nel tempo disponibile e non ho modificato nulla nel CRM. Puoi riformularla in modo più specifico?"
+        return finish("Mi dispiace, in questo momento non riesco a contattare il modello o a completare l'operazione. Non ho modificato nulla nel CRM: riprova tra poco o riformula la richiesta.")
+    return finish("Non sono riuscito a completare la richiesta nel tempo disponibile e non ho modificato nulla nel CRM. Puoi riformularla in modo più specifico?")

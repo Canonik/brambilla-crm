@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, Paperclip, RefreshCw, Send, Square, TriangleAlert, X } from "lucide-react";
+import { Paperclip, RefreshCw, Send, ShieldCheck, Square, TriangleAlert, X } from "lucide-react";
 import { useAssistant, type ChatMessage } from "./AssistantContext";
+import { EvidenceInspector } from "./EvidenceInspector";
 import { useCurrentUser } from "@/app/currentUser";
 import { Button } from "@/components/ui/Button";
 import { Avatar } from "@/components/ui/Avatar";
 import { cn } from "@/lib/cn";
 import { formatDateTime } from "@/lib/format";
-import type { AgentAttachment, AgentTraceStep } from "@/api/types";
+import type { AgentAttachment } from "@/api/types";
 
 const SUGGESTIONS = [
   "Quanto abbiamo fatturato con Nuova Tessile Spinelli nel 2025?",
@@ -29,48 +30,14 @@ export function AssistantMark({ className, size = 20 }: { className?: string; si
   );
 }
 
-function Trace({ steps }: { steps: AgentTraceStep[] }) {
-  const [open, setOpen] = useState(false);
-  if (!steps.length) return null;
-  return (
-    <div className="mt-2 border-t border-line pt-2">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1 text-[12px] text-ink-2 hover:text-ink"
-        aria-expanded={open}
-      >
-        <ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} aria-hidden />
-        How this answer was produced · {steps.length} {steps.length === 1 ? "step" : "steps"}
-      </button>
-      {open ? (
-        <ol className="mt-2 space-y-1.5 text-[12px]">
-          {steps.map((s, i) => {
-            const name = s.tool ?? s.name ?? `step ${i + 1}`;
-            const input = s.input ?? s.args;
-            const output = s.output ?? s.result;
-            return (
-              <li key={i} className="rounded-md bg-surface-2 px-2.5 py-2">
-                <div className="font-medium text-ink">{name}</div>
-                {s.summary ? <div className="text-ink-2">{s.summary}</div> : null}
-                {input !== undefined ? <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11.5px] text-ink-2">{typeof input === "string" ? input : JSON.stringify(input, null, 1)}</pre> : null}
-                {output !== undefined ? <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11.5px] text-ink-2">{typeof output === "string" ? output : JSON.stringify(output, null, 1)}</pre> : null}
-              </li>
-            );
-          })}
-        </ol>
-      ) : null}
-    </div>
-  );
-}
-
 function Bubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => void }) {
   const { user } = useCurrentUser();
+  const { evidenceEnabled } = useAssistant();
   const mine = message.role === "user";
   return (
     <div className={cn("flex gap-2.5", mine ? "flex-row-reverse" : "flex-row")}>
       {mine ? <Avatar name={user.name} size="sm" className="mt-1" /> : <AssistantMark className="mt-1" size={24} />}
-      <div className={cn("min-w-0 max-w-[85%]", mine && "text-right")}>
+      <div className={cn("min-w-0", !mine && evidenceEnabled && message.evidence ? "w-full max-w-full" : "max-w-[85%]", mine && "text-right")}>
         <div
           className={cn(
             "inline-block max-w-full rounded-lg px-3.5 py-2.5 text-left",
@@ -95,7 +62,7 @@ function Bubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => vo
               ))}
             </ul>
           ) : null}
-          {!mine && message.trace?.length ? <Trace steps={message.trace} /> : null}
+          {!mine && evidenceEnabled && message.evidence ? <EvidenceInspector value={message.evidence} /> : null}
         </div>
         <div className={cn("mt-1 flex items-center gap-2 text-[11px] text-ink-3", mine ? "justify-end" : "justify-start")}>
           <time dateTime={message.at}>{formatDateTime(message.at)}</time>
@@ -132,7 +99,7 @@ function Thinking() {
 }
 
 export function AssistantChat({ variant = "panel" }: { variant?: "panel" | "page" }) {
-  const { messages, pending, send, retry, reset, cancel, draft, setDraft } = useAssistant();
+  const { messages, pending, send, retry, reset, cancel, draft, setDraft, evidenceEnabled, setEvidenceEnabled } = useAssistant();
   const { user } = useCurrentUser();
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
@@ -178,6 +145,24 @@ export function AssistantChat({ variant = "panel" }: { variant?: "panel" | "page
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", variant === "page" && "mx-auto w-full max-w-3xl")}>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/80 px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2 text-[11px] text-ink-2">
+          <ShieldCheck className="size-3.5 shrink-0 text-gentian" aria-hidden />
+          <span className="truncate">Assistant Insights <span className="text-ink-3">· observable CRM evidence</span></span>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={evidenceEnabled}
+          onClick={() => setEvidenceEnabled(!evidenceEnabled)}
+          className="inline-flex shrink-0 items-center gap-2 text-[11px] font-medium text-ink-2"
+        >
+          Show reasoning evidence
+          <span className={cn("relative h-5 w-9 rounded-full transition-colors", evidenceEnabled ? "bg-gentian" : "bg-line-strong")}>
+            <span className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform", evidenceEnabled ? "translate-x-[18px]" : "translate-x-0.5")} />
+          </span>
+        </button>
+      </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto scroll-quiet px-4 py-4">
         {messages.length === 0 ? (
           <div className={cn("flex h-full flex-col justify-end gap-4", variant === "page" && "justify-center")}>

@@ -192,6 +192,40 @@ function agentReply(body: AgentRequest, d: MockDb): string {
   return "Posso aiutarti a cercare aziende, contatti e trattative, aggiornare una trattativa o aprire un ticket. Dimmi il nome dell'azienda o della trattativa e cosa vuoi fare.";
 }
 
+function agentEvidence(body: AgentRequest, d: MockDb) {
+  const last = body.messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
+  const q = last.toLowerCase();
+  const company = d.companies.find((item) => q.includes(item.properties.name!.split(" ").slice(0, 2).join(" ").toLowerCase()));
+  if (q.includes("fatturat") && company) {
+    const dealIds = Array.from(d.assoc.companies?.[company.id]?.deals ?? []);
+    const rates: Record<string, number> = { EUR: 1, USD: 0.92, GBP: 1.17 };
+    const matchingDeals = dealIds.map((id) => d.deals.find((deal) => deal.id === id)).filter((deal): deal is Row => Boolean(deal))
+      .filter((deal) => deal.properties.dealstage === "closedwon" && (deal.properties.closedate ?? "").startsWith("2025"));
+    const deals = matchingDeals.slice(0, 20);
+    const terms = deals.map((deal) => ({
+      record: { type: "deals", id: deal.id },
+      amount: (Number(deal.properties.amount ?? 0) * (rates[deal.properties.deal_currency_code ?? "EUR"] ?? 1)).toFixed(2),
+    }));
+    const result = terms.reduce((sum, term) => sum + Number(term.amount), 0).toFixed(2);
+    return {
+      version: 1, incomplete: matchingDeals.length > 20,
+      events: [
+        { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
+        { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Company lookup", records: [{ type: "companies", id: company.id }] },
+        { sequence: 3, call: 2, tool: "revenue", operation: "read", status: "attempted" },
+        { sequence: 4, call: 2, tool: "revenue", operation: "read", status: "completed", durationMs: 27, inputSummary: `Revenue for company #${company.id} in 2025`, records: [{ type: "companies", id: company.id }, ...terms.map((term) => term.record)], calculation: { kind: "sum_money_v1", policy: "brambilla_revenue_v1", currency: "EUR", populationComplete: matchingDeals.length <= 20, populationCount: matchingDeals.length, terms, result, year: 2025 } },
+      ],
+    };
+  }
+  return {
+    version: 1, incomplete: false,
+    events: [
+      { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
+      { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Company lookup", records: d.companies.slice(0, 2).map((item) => ({ type: "companies", id: item.id })) },
+    ],
+  };
+}
+
 export async function mockRequest<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const d = getDb();
   const method = opts.method ?? "GET";
@@ -230,7 +264,11 @@ export async function mockRequest<T>(path: string, opts: RequestOptions = {}): P
   if (pathname === "/__agente" && method === "POST") {
     await sleep(600 + Math.random() * 900);
     const body = opts.body as AgentRequest;
-    return { reply: agentReply(body, d), trace: [{ tool: "search_crm", summary: "Ricerca nel CRM sui record citati" }] } as T;
+    const response: Record<string, unknown> = { reply: agentReply(body, d) };
+    if (String(query.trace ?? "") === "1") {
+      response.trace = agentEvidence(body, d);
+    }
+    return response as T;
   }
 
   let m: RegExpMatchArray | null;

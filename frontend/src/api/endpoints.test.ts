@@ -82,10 +82,15 @@ describe("endpoints against the mock backend", () => {
   });
 
   it("answers the assistant contract", async () => {
-    const res = await api.askAssistant({
+    const request: Parameters<typeof api.askAssistant>[0] = {
       context: { now: "2026-12-02T10:00:00+01:00", user: "mattia.vigano@brambillaforniture.it" },
       messages: [{ role: "user", content: "Quanto abbiamo fatturato con Nuova Tessile Spinelli nel 2025?" }],
-    });
+    };
+    const res = await api.askAssistant(request);
     expect(res.reply).toMatch(/Nuova Tessile Spinelli/);
+    expect(res.trace).toBeUndefined();
+    const inspected = await api.askAssistant(request, undefined, true);
+    expect(inspected.trace?.version).toBe(1);
+    expect(inspected.trace?.events[1]?.tool).toBe("search_companies");
   });
 });

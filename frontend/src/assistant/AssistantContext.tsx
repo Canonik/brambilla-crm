@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { askAssistant } from "@/api/endpoints";
-import type { AgentAttachment, AgentMessage, AgentTraceStep } from "@/api/types";
+import type { AgentAttachment, AgentMessage, AssistantEvidence } from "@/api/types";
 import { useCurrentUser } from "@/app/currentUser";
 import { errorMessage } from "@/components/ui/States";
 
@@ -11,7 +11,7 @@ import { errorMessage } from "@/components/ui/States";
 export interface ChatMessage extends AgentMessage {
   id: string;
   at: string;
-  trace?: AgentTraceStep[];
+  evidence?: AssistantEvidence;
   /** Set when the turn failed; the message is kept so the user can retry. */
   failed?: string;
 }
@@ -20,6 +20,8 @@ interface AssistantApi {
   messages: ChatMessage[];
   pending: boolean;
   error: string | null;
+  evidenceEnabled: boolean;
+  setEvidenceEnabled: (enabled: boolean) => void;
   open: boolean;
   setOpen: (open: boolean) => void;
   toggle: () => void;
@@ -49,7 +51,9 @@ function nowIso(): string {
 function load(): ChatMessage[] {
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(({ evidence: _evidence, trace: _trace, ...message }) => message as ChatMessage);
   } catch {
     return [];
   }
@@ -60,13 +64,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>(load);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [evidenceEnabled, setEvidenceEnabledState] = useState(false);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      const safe = messages.map(({ evidence: _evidence, ...message }) => message);
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
     } catch {
       // ignore
     }
@@ -75,6 +82,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const run = useCallback(
     async (history: ChatMessage[]) => {
       abortRef.current?.abort();
+      const requestId = ++requestRef.current;
       const controller = new AbortController();
       abortRef.current = controller;
       setPending(true);
@@ -88,28 +96,31 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
               .map(({ role, content, attachments }) => (attachments?.length ? { role, content, attachments } : { role, content })),
           },
           controller.signal,
+          evidenceEnabled,
         );
+        if (requestRef.current !== requestId) return;
         const reply: ChatMessage = {
           id: `a-${Date.now()}`,
           role: "assistant",
           content: typeof res?.reply === "string" && res.reply.trim() ? res.reply : "(The assistant sent an empty reply.)",
           at: new Date().toISOString(),
-          trace: res?.trace ?? res?.tools,
+          evidence: res?.trace,
         };
         setMessages((m) => [...m, reply]);
       } catch (err) {
+        if (requestRef.current !== requestId) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         const msg = errorMessage(err);
         setError(msg);
         setMessages((m) => m.map((x, i) => (i === m.length - 1 && x.role === "user" ? { ...x, failed: msg } : x)));
       } finally {
-        if (abortRef.current === controller) {
+        if (abortRef.current === controller && requestRef.current === requestId) {
           abortRef.current = null;
           setPending(false);
         }
       }
     },
-    [user.email],
+    [evidenceEnabled, user.email],
   );
 
   const send = useCallback(
@@ -137,6 +148,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, [messages, run]);
 
   const reset = useCallback(() => {
+    requestRef.current += 1;
     abortRef.current?.abort();
     setMessages([]);
     setError(null);
@@ -144,10 +156,16 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancel = useCallback(() => {
+    requestRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
     setPending(false);
     setMessages((m) => m.map((x, i) => (i === m.length - 1 && x.role === "user" ? { ...x, failed: "Cancelled" } : x)));
+  }, []);
+
+  const setEvidenceEnabled = useCallback((enabled: boolean) => {
+    setEvidenceEnabledState(enabled);
+    if (!enabled) setMessages((current) => current.map(({ evidence: _evidence, ...message }) => message));
   }, []);
 
   const api = useMemo<AssistantApi>(
@@ -155,6 +173,8 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       messages,
       pending,
       error,
+      evidenceEnabled,
+      setEvidenceEnabled,
       open,
       setOpen,
       toggle: () => setOpen((o) => !o),
@@ -169,7 +189,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
       reset,
       cancel,
     }),
-    [messages, pending, error, open, draft, send, retry, reset, cancel],
+    [messages, pending, error, evidenceEnabled, open, draft, send, retry, reset, cancel, setEvidenceEnabled],
   );
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;

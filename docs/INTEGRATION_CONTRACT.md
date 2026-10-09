@@ -135,10 +135,15 @@ Core builds no `/ui/api/*` endpoints and no `/ui/login`. The SPA's typed client 
 `frontend/src/api/endpoints.ts`. What the board and lists rely on: exact `total` in search
 replies, association filters in search (section 10), `associations` param on GET by id.
 
-Execution inspector (P4, only if Core has time): `POST /__agente?trace=1` replies
-`{"reply": "...", "trace": [{"tool", "input", "output", "summary"}]}`; without the query
-parameter the reply is exactly `{"reply": "..."}` as the brief requires. The organizers never
-send the parameter, so their shape check cannot be affected.
+Assistant Insights (optional, implemented): `POST /__agente?trace=1` replies with
+`{"reply":"...","trace":{"version":1,"events":[...],"incomplete":false}}`. Events contain
+only allowlisted tool identifiers, fixed safe input summaries, canonical CRM record references,
+duration and observed read/write status. Revenue may include an exact-decimal deterministic
+calculation receipt. Raw tool arguments/results, prompts, attachments, credentials and record
+properties are never serialized. Without the query parameter the reply remains exactly
+`{"reply":"..."}` as the brief requires and the observer is disabled. The SPA requests the
+extension only after the user enables **Show reasoning evidence**; evidence is kept out of model
+history and browser storage. This is behavioral provenance, not chain-of-thought or model internals.
 
 ## 6. UI routes (SPA) and `/health.ui`
 

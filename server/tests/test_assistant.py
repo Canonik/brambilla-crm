@@ -101,3 +101,56 @@ def test_model_failure_never_claims_success(api, monkeypatch):
     monkeypatch.setattr(agent, "TURN_BUDGET_S", 2.0)
     r = api.post("/__agente", headers=H, json={"context": CTX, "messages": [{"role": "user", "content": "ciao"}]})
     assert r.status_code == 200 and "Non ho modificato" in r.json()["reply"]
+
+
+def test_evidence_is_opt_in_and_bare_contract_stays_exact(api, monkeypatch):
+    body = {"context": CTX, "messages": [{"role": "user", "content": "ciao"}]}
+    monkeypatch.setattr(agent, "MODEL_CLIENT", Script(["Ciao!"]))
+    bare = api.post("/__agente", headers=H, json=body)
+    assert bare.status_code == 200
+    assert bare.json() == {"reply": "Ciao!"}
+
+    monkeypatch.setattr(agent, "MODEL_CLIENT", Script(["Ciao!"]))
+    traced = api.post("/__agente?trace=1", headers=H, json=body)
+    assert traced.status_code == 200
+    assert traced.json()["reply"] == "Ciao!"
+    assert traced.json()["trace"] == {"version": 1, "events": [], "incomplete": False}
+
+
+def test_revenue_trace_has_safe_records_timing_and_exact_calculation(api, monkeypatch):
+    comp, deal = _setup(api)
+    api.patch(f"/crm/v3/objects/deals/{deal['id']}", headers=H, json={"properties": {"dealstage": "closedwon", "closedate": "2025-03-10"}})
+    script = Script([
+        [("search_companies", {"name": "Nuova Serramenti Mazza SECRET"})],
+        [("revenue", {"company_id": comp["id"], "year": 2025})],
+        "Nel 2025 abbiamo fatturato 12.500,00 €.",
+    ])
+    monkeypatch.setattr(agent, "MODEL_CLIENT", script)
+    response = api.post("/__agente?trace=1", headers=H, json={"context": CTX, "messages": [{"role": "user", "content": "fatturato"}]})
+    assert response.status_code == 200
+    trace = response.json()["trace"]
+    assert trace["version"] == 1 and trace["incomplete"] is False
+    assert [event["status"] for event in trace["events"]] == ["attempted", "completed", "attempted", "completed"]
+    final = trace["events"][-1]
+    assert final["tool"] == "revenue" and isinstance(final["durationMs"], int)
+    assert {tuple(record.values()) for record in final["records"]} == {("companies", comp["id"]), ("deals", deal["id"])}
+    assert final["calculation"]["result"] == "12500.00"
+    assert final["calculation"]["terms"] == [{"record": {"type": "deals", "id": deal["id"]}, "amount": "12500.00"}]
+    serialized = json.dumps(trace)
+    assert "SECRET" not in serialized and "anna.sala" not in serialized
+
+
+def test_write_trace_distinguishes_attempt_return_and_commit(api, monkeypatch):
+    _, deal = _setup(api)
+    script = Script([
+        [("update_record", {"object_type": "deals", "id": deal["id"], "properties": {"dealstage": "Vinta", "description": "SECRET"}})],
+        "Fatto.",
+    ])
+    monkeypatch.setattr(agent, "MODEL_CLIENT", script)
+    response = api.post("/__agente?trace=1", headers=H, json={"context": CTX, "messages": [{"role": "user", "content": "segna vinta"}]})
+    assert response.status_code == 200
+    events = response.json()["trace"]["events"]
+    assert [event["status"] for event in events] == ["attempted", "awaiting_commit", "committed"]
+    assert events[-1]["records"] == [{"type": "deals", "id": deal["id"]}]
+    assert events[-1]["inputSummary"] == f"deals #{deal['id']}"
+    assert "SECRET" not in json.dumps(events)

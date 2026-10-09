@@ -58,6 +58,7 @@ async def migrate(request: Request):
 
 @router.post("/__agente")
 async def agente(request: Request):
+    include_trace = request.query_params.get("trace") == "1"
     try:
         body = await json_body(request)
     except Exception:
@@ -65,13 +66,21 @@ async def agente(request: Request):
     from ..assistant.agent import handle_conversation
     from starlette.concurrency import run_in_threadpool
     try:
-        reply = await run_in_threadpool(handle_conversation, body)
+        result = await run_in_threadpool(handle_conversation, body, include_trace=include_trace)
+        if include_trace:
+            reply, trace = result
+        else:
+            reply, trace = result, None
         if not isinstance(reply, str) or not reply.strip():
             reply = "Mi dispiace, non sono riuscito a elaborare la richiesta. Puoi riformularla?"
     except Exception:
         log.exception("assistant failed")
         reply = "Mi dispiace, si è verificato un errore tecnico e non ho potuto completare la richiesta. Nessuna modifica è stata apportata al CRM."
-    return {"reply": reply}
+        trace = None
+    response = {"reply": reply}
+    if include_trace and trace is not None:
+        response["trace"] = trace
+    return response
 
 
 @router.get("/__stats")

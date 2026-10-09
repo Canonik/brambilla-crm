@@ -237,24 +237,47 @@ export interface AgentRequest {
   messages: AgentMessage[];
 }
 
-/**
- * The contract only promises `reply`. If the backend also returns a trace of
- * the tools it called, the chat shows it as provenance for the answer.
- */
-export interface AgentResponse {
-  reply: string;
-  trace?: AgentTraceStep[];
-  tools?: AgentTraceStep[];
+export type EvidenceOperation = "read" | "write";
+export type EvidenceStatus = "attempted" | "completed" | "failed" | "awaiting_commit" | "committed" | "rolled_back" | "unknown";
+
+export interface EvidenceRecord {
+  type: ObjectType;
+  id: string;
 }
 
-export interface AgentTraceStep {
-  tool?: string;
-  name?: string;
-  input?: unknown;
-  args?: unknown;
-  output?: unknown;
-  result?: unknown;
-  summary?: string;
+export interface EvidenceCalculation {
+  kind: "sum_money_v1";
+  policy?: string;
+  currency: "EUR";
+  populationComplete: boolean;
+  populationCount: number;
+  terms: Array<{ record: EvidenceRecord; amount: string }>;
+  result: string;
+  year?: number | null;
+}
+
+export interface AssistantEvidenceEvent {
+  sequence: number;
+  call: number;
+  tool: string;
+  operation: EvidenceOperation;
+  status: EvidenceStatus;
+  durationMs?: number;
+  inputSummary?: string;
+  records?: EvidenceRecord[];
+  calculation?: EvidenceCalculation;
+}
+
+export interface AssistantEvidence {
+  version: 1;
+  events: AssistantEvidenceEvent[];
+  incomplete: boolean;
+}
+
+/** The bare challenge contract returns only `reply`; the opted-in UI request may add a sanitized trace. */
+export interface AgentResponse {
+  reply: string;
+  trace?: AssistantEvidence;
 }
 
 export interface CrmUser {

@@ -10,6 +10,7 @@ from .. import db, defaults
 from ..errors import ApiError
 from ..store import Store
 from ..util import iso, parse_datetime
+from .evidence import EvidenceTrace
 
 FX = {"EUR": Decimal("1"), "USD": Decimal("0.92"), "GBP": Decimal("1.17")}
 MAX_LIST = 25
@@ -565,22 +566,47 @@ TOOL_SCHEMAS = [
 ]
 
 
-def run_tool(ctx: ToolContext, name: str, args: dict) -> dict:
+def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | None = None) -> dict:
+    call_id = observer.begin(name, args) if observer else None
     fn = getattr(ctx, name, None)
     if fn is None or name.startswith("_"):
+        if observer:
+            observer.failed(call_id)
         return {"error": f"strumento sconosciuto: {name}"}
     with db.connection() as conn:
         store = Store(conn, ctx.now)
         try:
             out = fn(store, **(args or {}))
+            if observer:
+                observer.returned(call_id, out)
             conn.commit()
+            if observer:
+                observer.transaction_finished(call_id, "committed")
             return out
         except ApiError as e:
-            conn.rollback()
+            outcome = "rolled_back"
+            try:
+                conn.rollback()
+            except Exception:
+                outcome = "unknown"
+            if observer:
+                observer.failed(call_id, outcome=outcome)
             return {"error": e.message, "status": e.status}
         except TypeError as e:
-            conn.rollback()
+            outcome = "rolled_back"
+            try:
+                conn.rollback()
+            except Exception:
+                outcome = "unknown"
+            if observer:
+                observer.failed(call_id, outcome=outcome)
             return {"error": f"argomenti non validi: {e}"}
         except Exception as e:
-            conn.rollback()
+            outcome = "rolled_back"
+            try:
+                conn.rollback()
+            except Exception:
+                outcome = "unknown"
+            if observer:
+                observer.failed(call_id, outcome=outcome)
             return {"error": f"errore interno: {type(e).__name__}: {str(e)[:200]}"}

@@ -638,9 +638,9 @@ export function getHealth() {
 
 /**
  * The bare contract returns exactly `{reply}`. With `?trace=1` the backend may
- * add `trace`, the list of tool calls behind the answer; the chat shows it
- * only when present.
+ * add a bounded sanitized `trace` envelope; the chat shows it only when the
+ * user has enabled Assistant Insights.
  */
-export function askAssistant(body: AgentRequest, signal?: AbortSignal) {
-  return call<AgentResponse>("/__agente", { method: "POST", body, signal, query: { trace: 1 } });
+export function askAssistant(body: AgentRequest, signal?: AbortSignal, includeTrace = false) {
+  return call<AgentResponse>("/__agente", { method: "POST", body, signal, query: includeTrace ? { trace: 1 } : undefined });
 }
