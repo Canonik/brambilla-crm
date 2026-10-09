@@ -19,6 +19,10 @@ app = FastAPI(title="Brambilla CRM", version=config.API_VERSION, docs_url="/__do
 PUBLIC_PATHS = {"/health", "/__docs", "/__openapi.json"}
 
 
+def is_api_path(path: str) -> bool:
+    return path.startswith("/crm/") or path.startswith("/__") or path.startswith("/api/") or path.startswith("/health")
+
+
 class RateCounter:
     def __init__(self):
         self.lock = threading.Lock()
@@ -49,7 +53,7 @@ rate = RateCounter()
 @app.middleware("http")
 async def auth_and_limits(request: Request, call_next):
     path = request.url.path
-    public = path in PUBLIC_PATHS or path.startswith("/crm/v3/exports/download/") or request.method == "OPTIONS"
+    public = path in PUBLIC_PATHS or path.startswith("/crm/v3/exports/download/") or request.method == "OPTIONS" or (request.method in ("GET", "HEAD") and not is_api_path(path))
     if not public:
         auth = request.headers.get("authorization", "")
         ok = False
@@ -120,3 +124,41 @@ app.include_router(lists.router)
 app.include_router(owners.router)
 app.include_router(exports.router)
 app.include_router(imports.router)
+
+
+# ------------------------------------------------------------------ UI (SPA or placeholder)
+import os
+from fastapi.responses import FileResponse, HTMLResponse
+from starlette.staticfiles import StaticFiles
+
+_PLACEHOLDER = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Brambilla CRM</title>
+<style>body{font-family:system-ui,sans-serif;margin:3rem;color:#222}nav a{margin-right:1rem}</style></head>
+<body><h1>Brambilla CRM</h1><p>The interface is being deployed. API is available under <code>/crm/v3</code>.</p>
+<nav><a href="/companies">Companies</a><a href="/contacts">Contacts</a><a href="/deals">Deals</a><a href="/tickets">Tickets</a><a href="/dormant">Dormant customers</a><a href="/assistant">Assistant</a></nav>
+</body></html>"""
+
+
+def _dist_dir() -> str | None:
+    d = config.FRONTEND_DIST
+    if d and os.path.isfile(os.path.join(d, "index.html")):
+        return d
+    return None
+
+
+_dist = _dist_dir()
+if _dist and os.path.isdir(os.path.join(_dist, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_dist, "assets")), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa(full_path: str, request: Request):
+    path = "/" + full_path
+    if is_api_path(path):
+        return JSONResponse(status_code=404, content=ApiError(404, "resource not found", "OBJECT_NOT_FOUND").body())
+    dist = _dist_dir()
+    if dist:
+        candidate = os.path.normpath(os.path.join(dist, full_path))
+        if full_path and candidate.startswith(dist) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(dist, "index.html"), media_type="text/html")
+    return HTMLResponse(_PLACEHOLDER)
