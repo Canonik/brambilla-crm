@@ -53,6 +53,34 @@ export interface EvidenceRelation {
   to: EvidenceRecord;
 }
 
+export type GroundingKind = "amount" | "record_id" | "email" | "date" | "name";
+export interface GroundingFact {
+  text: string;
+  kind: GroundingKind;
+  status: "grounded" | "unverified";
+  event?: number;
+}
+export interface EvidenceGrounding {
+  facts: GroundingFact[];
+  grounded: number;
+  unverified: number;
+}
+export interface EvidenceAutomation {
+  rule: "R10" | "R11" | "R12";
+  record: EvidenceRecord;
+}
+export interface EvidenceDecisionRecord extends EvidenceRecord {
+  label?: string;
+  detail?: string;
+}
+export interface EvidenceDecisionPath {
+  searches: number[];
+  candidates: number;
+  chosen?: EvidenceDecisionRecord;
+  automations: EvidenceAutomation[];
+  action: string;
+}
+
 const TYPES = new Set<ObjectType>(["companies", "contacts", "deals", "tickets", "products", "line_items", "notes", "calls", "emails", "meetings", "tasks"]);
 const READ = new Set<EvidenceStatus>(["attempted", "completed", "failed"]);
 const WRITE = new Set<EvidenceStatus>(["attempted", "awaiting_commit", "committed", "rolled_back", "unknown"]);
@@ -61,6 +89,9 @@ const SETTLED = new Set<EvidenceStatus>(["completed", "failed", "committed", "ro
 const MONEY = /^-?(?:0|[1-9][0-9]{0,13})\.[0-9]{2}$/;
 const ID = /^[1-9][0-9]{0,19}$/;
 const MAX_COUNT = 1_000_000;
+const DECISION_WRITES = new Set(["create_record", "update_record", "associate", "archive_record", "import_attachment", "create_records_bulk"]);
+const GROUNDING_KINDS = new Set<GroundingKind>(["amount", "record_id", "email", "date", "name"]);
+const AUTOMATION_RULES = new Set<EvidenceAutomation["rule"]>(["R10", "R11", "R12"]);
 
 export interface ProjectedEvidenceEvent extends Omit<AssistantEvidenceEvent, "records" | "calculation"> {
   label: string;
@@ -70,11 +101,13 @@ export interface ProjectedEvidenceEvent extends Omit<AssistantEvidenceEvent, "re
   total?: number;
   failure?: EvidenceFailure;
   calculation?: EvidenceCalculation;
+  decisionPath?: EvidenceDecisionPath;
 }
 
 export interface ProjectedEvidence {
   events: ProjectedEvidenceEvent[];
   incomplete: boolean;
+  grounding?: EvidenceGrounding;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -111,6 +144,34 @@ function calculation(value: unknown): EvidenceCalculation | undefined {
     populationCount: value.populationCount as number, terms, result: value.result,
     ...(typeof value.policy === "string" && value.policy.length <= 80 ? { policy: value.policy } : {}),
     ...(Number.isSafeInteger(value.year) ? { year: value.year as number } : {}),
+  };
+}
+
+function grounding(value: unknown, events: ProjectedEvidenceEvent[]): EvidenceGrounding | undefined {
+  if (!isObject(value) || !Array.isArray(value.facts)) return undefined;
+  const sequences = new Set(events.map((event) => event.sequence));
+  const facts: GroundingFact[] = [];
+  for (const raw of value.facts.slice(0, 32)) {
+    if (!isObject(raw) || typeof raw.text !== "string" || raw.text.length < 1 || raw.text.length > 120 || /[\u0000-\u001f]/.test(raw.text) ||
+        !GROUNDING_KINDS.has(raw.kind as GroundingKind) || (raw.status !== "grounded" && raw.status !== "unverified")) continue;
+    if (raw.status === "grounded") {
+      if (!Number.isSafeInteger(raw.event) || !sequences.has(raw.event as number)) continue;
+      facts.push({ text: raw.text, kind: raw.kind as GroundingKind, status: "grounded", event: raw.event as number });
+    } else {
+      facts.push({ text: raw.text, kind: raw.kind as GroundingKind, status: "unverified" });
+    }
+  }
+  const grounded = facts.filter((fact) => fact.status === "grounded").length;
+  return { facts, grounded, unverified: facts.length - grounded };
+}
+
+function decisionRecord(value: unknown): EvidenceDecisionRecord | null {
+  const ref = record(value);
+  if (!ref || !isObject(value)) return null;
+  return {
+    ...ref,
+    ...(typeof value.label === "string" && value.label.length >= 1 && value.label.length <= 80 && !/[\u0000-\u001f]/.test(value.label) ? { label: value.label } : {}),
+    ...(typeof value.detail === "string" && value.detail.length >= 1 && value.detail.length <= 80 && !/[\u0000-\u001f]/.test(value.detail) ? { detail: value.detail } : {}),
   };
 }
 
@@ -157,7 +218,35 @@ export function projectEvidence(value: unknown): ProjectedEvidence | null {
     if (FAILURES.has(raw.failure as EvidenceFailure) && (status === "failed" || status === "rolled_back" || status === "unknown")) event.failure = raw.failure as EvidenceFailure;
     const calc = calculation(raw.calculation);
     if (calc && op === "read" && status === "completed") event.calculation = calc;
+    if (isObject(raw.decisionPath) && op === "write" && DECISION_WRITES.has(raw.tool) &&
+        (status === "committed" || status === "rolled_back" || status === "unknown")) {
+      const searches: number[] = [];
+      if (Array.isArray(raw.decisionPath.searches)) for (const sequence of raw.decisionPath.searches.slice(0, 12)) {
+        const source = projected.events.find((candidate) => candidate.sequence === sequence);
+        if (Number.isSafeInteger(sequence) && source?.operation === "read" && source.status === "completed") searches.push(sequence as number);
+        else projected.incomplete = true;
+      }
+      const candidates = count(raw.decisionPath.candidates);
+      const chosen = decisionRecord(raw.decisionPath.chosen);
+      const action = typeof raw.decisionPath.action === "string" && raw.decisionPath.action.length >= 1 && raw.decisionPath.action.length <= 80 && !/[\u0000-\u001f]/.test(raw.decisionPath.action)
+        ? raw.decisionPath.action : "Changed the CRM";
+      const automations: EvidenceAutomation[] = [];
+      if (Array.isArray(raw.decisionPath.automations)) for (const item of raw.decisionPath.automations.slice(0, 12)) {
+        const ref = isObject(item) ? record(item.record) : null;
+        if (isObject(item) && AUTOMATION_RULES.has(item.rule as EvidenceAutomation["rule"]) && ref) automations.push({ rule: item.rule as EvidenceAutomation["rule"], record: ref });
+        else projected.incomplete = true;
+      }
+      if (candidates !== undefined) event.decisionPath = { searches, candidates, ...(chosen ? { chosen } : {}), automations, action };
+      else projected.incomplete = true;
+    }
     projected.events.push(event);
+  }
+  const projectedGrounding = grounding(value.grounding, projected.events);
+  if (projectedGrounding) {
+    projected.grounding = projectedGrounding;
+    if (isObject(value.grounding) &&
+        (value.grounding.grounded !== projectedGrounding.grounded || value.grounding.unverified !== projectedGrounding.unverified ||
+         (Array.isArray(value.grounding.facts) && value.grounding.facts.length !== projectedGrounding.facts.length))) projected.incomplete = true;
   }
   return projected;
 }
@@ -187,6 +276,7 @@ export interface InsightCall {
   total?: number;
   failure?: EvidenceFailure;
   calculation?: EvidenceCalculation;
+  decisionPath?: EvidenceDecisionPath;
 }
 
 export interface InsightRecord extends EvidenceRecord {
@@ -247,6 +337,7 @@ export function deriveInsights(evidence: ProjectedEvidence): Insights {
     if (event.total !== undefined) call.total = event.total;
     if (event.failure) call.failure = event.failure;
     if (event.calculation) call.calculation = event.calculation;
+    if (event.decisionPath) call.decisionPath = event.decisionPath;
   }
   const calls = [...byCall.values()];
 

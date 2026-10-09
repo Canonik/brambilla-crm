@@ -6,6 +6,7 @@ import type { InsightCall } from "../evidence";
 import { FAILURE_LABELS } from "../evidence";
 import { RecordRef } from "./RecordRef";
 import { STATUS_LABELS, STATUS_TONES, formatMs } from "./status";
+import { DecisionPath } from "./DecisionPath";
 import styles from "./insights.module.css";
 
 const WRITE_STAGES: Array<{ key: "attempted" | "awaiting_commit" | "committed"; label: string }> = [
@@ -50,7 +51,7 @@ function WriteStages({ call }: { call: InsightCall }) {
   );
 }
 
-function Row({ call, index }: { call: InsightCall; index: number }) {
+function Row({ call, index, showDetails }: { call: InsightCall; index: number; showDetails: boolean }) {
   const [open, setOpen] = useState(false);
   const detailId = `insight-call-${call.call}-detail`;
   const hasDetail = call.records.length > 0 || call.failure !== undefined;
@@ -71,14 +72,15 @@ function Row({ call, index }: { call: InsightCall; index: number }) {
           </p>
           {summary ? <p className="mt-0.5 text-[11.5px] text-ink-2">{summary}</p> : null}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
+        {showDetails ? <div className="flex shrink-0 flex-col items-end gap-1">
           <Badge tone={STATUS_TONES[call.status]} size="sm" dot>{STATUS_LABELS[call.status]}</Badge>
           {call.durationMs !== undefined ? <span className="tnum text-[10.5px] text-ink-3">{formatMs(call.durationMs)}</span> : null}
-        </div>
+        </div> : null}
       </div>
       {call.operation === "write" ? <WriteStages call={call} /> : null}
+      {showDetails && call.decisionPath ? <DecisionPath path={call.decisionPath} call={call} /> : null}
       {call.failure ? <p className="mt-1.5 text-[11.5px] text-bad">This step {FAILURE_LABELS[call.failure]}.</p> : null}
-      {hasDetail && call.records.length ? (
+      {showDetails && hasDetail && call.records.length ? (
         <>
           <button
             type="button"
@@ -103,13 +105,13 @@ function Row({ call, index }: { call: InsightCall; index: number }) {
   );
 }
 
-export function Timeline({ calls }: { calls: InsightCall[] }) {
+export function Timeline({ calls, showDetails = false }: { calls: InsightCall[]; showDetails?: boolean }) {
   if (!calls.length) {
     return <p className="text-[12px] text-ink-2">No CRM operation was observed for this reply.</p>;
   }
   return (
     <ol className="relative ml-2.5 border-l border-line pl-0 [&>li]:-ml-2.5" aria-label="Observed operations in order">
-      {calls.map((call, index) => <Row key={call.call} call={call} index={index} />)}
+      {calls.map((call, index) => <Row key={call.call} call={call} index={index} showDetails={showDetails} />)}
     </ol>
   );
 }

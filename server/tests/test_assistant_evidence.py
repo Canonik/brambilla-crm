@@ -167,3 +167,82 @@ def test_attachment_legacy_and_line_item_tools_produce_events_not_an_incomplete_
     assert final["import_attachment"]["status"] == "committed"
     assert final["import_attachment"]["records"] == [{"type": "contacts", "id": "801"}, {"type": "contacts", "id": "77"}]
     assert "SECRET" not in json.dumps(value)
+
+
+def test_grounding_matches_reply_facts_across_formats_without_serializing_payloads():
+    observer = EvidenceTrace(True)
+    call = observer.begin("search_deals", {"query": "PRIVATE QUERY"})
+    observer.returned(call, {
+        "total": 1,
+        "results": [{
+            "id": "42",
+            "name": "Fornitura Mazza",
+            "amount": "12345.67",
+            "email": "buyer@example.it",
+            "closedate": "2026-10-10T09:00:00+02:00",
+            "raw": "RAW TOOL PAYLOAD",
+        }],
+    })
+
+    value = observer.snapshot(
+        "Fornitura Mazza (ID 42) vale 12.345,67 €, buyer@example.it, il 10 ottobre 2026. "
+        "Non verificati: ID 999 e 99.99 €."
+    )
+    grounding = value["grounding"]
+    facts = {(fact["kind"], fact["text"]): (fact["status"], fact["event"]) for fact in grounding["facts"]}
+    assert grounding["grounded"] == 5
+    assert grounding["unverified"] == 2
+    assert facts[("name", "Fornitura Mazza")] == ("grounded", 2)
+    assert facts[("record_id", "42")] == ("grounded", 2)
+    assert facts[("amount", "12.345,67")] == ("grounded", 2)
+    assert facts[("email", "buyer@example.it")] == ("grounded", 2)
+    assert facts[("date", "10 ottobre 2026")] == ("grounded", 2)
+    assert facts[("record_id", "999")] == ("unverified", None)
+    assert facts[("amount", "99.99")] == ("unverified", None)
+    serialized = json.dumps(value)
+    assert "RAW TOOL PAYLOAD" not in serialized and "PRIVATE QUERY" not in serialized
+
+
+def test_decision_paths_link_preceding_reads_choice_write_and_r10_r11_r12():
+    observer = EvidenceTrace(True)
+    companies = observer.begin("search_companies", {"name": "Mazza"})
+    observer.returned(companies, {"total": 2, "results": [{"id": "18", "name": "Mazza"}, {"id": "19", "name": "Mazza"}]})
+    deals = observer.begin("search_deals", {"company_id": "18"})
+    observer.returned(deals, {"total": 1, "results": [{"id": "42", "name": "Fornitura Mazza", "company_id": "18"}]})
+
+    update = observer.begin("update_record", {"object_type": "deals", "id": "42", "properties": {"dealstage": "Vinta"}})
+    observer.returned(update, {
+        "ok": True, "object_type": "deals", "id": "42",
+        "automations": [
+            "ticket 88 'PRIVATE SUBJECT' aperto automaticamente (R10)",
+            "task 89 'PRIVATE TASK' con scadenza 2027-04-08 creato automaticamente (R11)",
+        ],
+    })
+    observer.transaction_finished(update, "committed")
+
+    contact = observer.begin("create_record", {"object_type": "contacts", "properties": {"email": "PRIVATE@example.it"}})
+    observer.returned(contact, {
+        "ok": True, "object_type": "contacts", "id": "77",
+        "automations": ["associato all'azienda PRIVATE COMPANY (id 18)"],
+    })
+    observer.transaction_finished(contact, "committed")
+
+    finals = [event for event in observer.snapshot()["events"] if event.get("status") == "committed"]
+    assert finals[0]["decisionPath"] == {
+        "searches": [2, 4],
+        "candidates": 3,
+        "chosen": {"type": "deals", "id": "42", "label": "Fornitura Mazza"},
+        "automations": [
+            {"rule": "R10", "record": {"type": "tickets", "id": "88"}},
+            {"rule": "R11", "record": {"type": "tasks", "id": "89"}},
+        ],
+        "action": "Moved the deal to Won",
+    }
+    assert finals[1]["decisionPath"]["searches"] == [2, 4]
+    assert finals[1]["decisionPath"]["candidates"] == 3
+    assert finals[1]["decisionPath"]["chosen"] == {"type": "contacts", "id": "77"}
+    assert finals[1]["decisionPath"]["automations"] == [
+        {"rule": "R12", "record": {"type": "companies", "id": "18"}},
+    ]
+    assert finals[1]["decisionPath"]["action"] == "Created the record"
+    assert "PRIVATE" not in json.dumps(finals)

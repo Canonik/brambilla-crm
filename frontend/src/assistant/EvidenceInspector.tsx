@@ -1,5 +1,5 @@
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Calculator, ChevronDown, Database, Route, ShieldCheck } from "lucide-react";
+import { Calculator, ChevronDown, Database, Route, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import type { AssistantEvidence } from "@/api/types";
 import { cn } from "@/lib/cn";
 import { deriveInsights, projectEvidence, type InsightVerdict } from "./evidence";
@@ -8,6 +8,8 @@ import { RecordGraph } from "./insights/RecordGraph";
 import { Receipt } from "./insights/Receipt";
 import { Limits } from "./insights/Limits";
 import { formatMs } from "./insights/status";
+import { Grounding } from "./insights/Grounding";
+import { Narrative, outcomeSentence } from "./insights/Narrative";
 import styles from "./insights/insights.module.css";
 
 type View = "actions" | "evidence" | "calculation" | "limits";
@@ -40,6 +42,7 @@ export function EvidenceInspector({ value, className }: EvidenceInspectorProps) 
   const insights = useMemo(() => (evidence ? deriveInsights(evidence) : null), [evidence]);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>("actions");
+  const [details, setDetails] = useState(false);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const id = useId();
   if (!evidence || !insights) return null;
@@ -89,6 +92,18 @@ export function EvidenceInspector({ value, className }: EvidenceInspectorProps) 
         <div>
           {open ? (
             <div className="border-t border-line p-3">
+              <p className="text-[14px] font-semibold leading-6 text-ink">{outcomeSentence(evidence, insights)}</p>
+              <Narrative insights={insights} />
+              {evidence.grounding ? <Grounding value={evidence.grounding} showDetails={details} /> : null}
+              <button
+                type="button"
+                aria-expanded={details}
+                onClick={() => setDetails((current) => !current)}
+                className="mt-3 inline-flex min-h-8 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 text-[12px] font-medium text-ink-2 hover:bg-surface-2"
+              >
+                <SlidersHorizontal className="size-3.5" aria-hidden />
+                Details
+              </button>
               <p className={cn("flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium", verdict.className)} role="status">
                 <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden />
                 {verdict.text}
@@ -122,7 +137,7 @@ export function EvidenceInspector({ value, className }: EvidenceInspectorProps) 
                 })}
               </div>
               <div id={`${id}-view-${view}`} role="tabpanel" aria-labelledby={`${id}-tab-${view}`} tabIndex={0} className="mt-3 min-h-24 focus:outline-none">
-                {view === "actions" ? <Timeline calls={insights.calls} /> : null}
+                {view === "actions" ? <Timeline calls={insights.calls} showDetails={details} /> : null}
                 {view === "evidence" ? <RecordGraph insights={insights} /> : null}
                 {view === "calculation" ? <Receipt call={insights.calculation} /> : null}
                 {view === "limits" ? <Limits items={insights.limitations} /> : null}
