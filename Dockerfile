@@ -1,10 +1,14 @@
-# Stage 1: build the SPA. A failing UI build must never break the API image.
+# Stage 1: build the SPA when frontend/ exists. A missing or failing UI build never breaks the API image.
 FROM node:22.12.0-alpine3.20 AS ui
 WORKDIR /ui
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
-COPY frontend/ ./
-RUN npm run build || (echo "UI BUILD FAILED, shipping placeholder" && mkdir -p dist && printf '<!doctype html><title>CRM</title><p>UI build failed. API is up at /health.</p>' > dist/index.html)
+COPY . /src
+RUN set -e; \
+    placeholder() { mkdir -p /ui/dist && printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>CRM</title></head><body><p>The interface is not built in this image. The API is up at /health.</p></body></html>' > /ui/dist/index.html; }; \
+    if [ -f /src/frontend/package.json ]; then \
+      cp -r /src/frontend/. /ui/ && rm -rf /ui/node_modules /ui/dist; \
+      if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi; \
+      (npm run build && test -f /ui/dist/index.html) || { echo "UI BUILD FAILED, shipping placeholder"; placeholder; }; \
+    else echo "no frontend/ in context, shipping placeholder"; placeholder; fi
 
 # Stage 2: the service.
 FROM python:3.12.8-slim-bookworm

@@ -1,5 +1,6 @@
 .git
 .venv
+**/.venv
 .remember
 .claude
 CLAUDE.md
@@ -11,4 +12,5 @@ legacy/export.zip
 tests
 tools
 docs
+experiments
 *.md
