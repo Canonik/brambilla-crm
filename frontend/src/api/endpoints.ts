@@ -606,6 +606,51 @@ export function topCompanies(limit = 8) {
   });
 }
 
+// ---------- associations in bulk ----------
+
+/** Company (first associated) for each deal, via the v4 batch association read. */
+export async function dealCompanies(dealIds: string[]): Promise<Record<string, Company>> {
+  const ids = Array.from(new Set(dealIds.filter(Boolean)));
+  if (ids.length === 0) return {};
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    try {
+      const res = await call<{ results: Array<{ from: { id: string | number }; to: Array<{ toObjectId: string | number }> }> }>(
+        "/crm/v4/associations/deals/companies/batch/read",
+        { method: "POST", body: { inputs: chunk.map((id) => ({ id })) } },
+      );
+      for (const r of res.results ?? []) {
+        const first = r.to?.[0];
+        if (first) pairs.push([String(r.from.id), String(first.toObjectId)]);
+      }
+    } catch {
+      // Board still renders without company names.
+    }
+  }
+  const companies = await batchRead<Company>("companies", pairs.map(([, c]) => c), ["name", "city", "state", "classe_cliente"]);
+  const byId = new Map(companies.map((c) => [c.id, c]));
+  const out: Record<string, Company> = {};
+  for (const [dealId, companyId] of pairs) {
+    const c = byId.get(companyId);
+    if (c) out[dealId] = c;
+  }
+  return out;
+}
+
+// ---------- global search ----------
+
+export async function globalSearch(query: string, limit = 5) {
+  const q = query.trim();
+  if (q.length < 2) return { companies: [] as Company[], contacts: [] as Contact[], deals: [] as Deal[] };
+  const [companies, contacts, deals] = await Promise.all([
+    searchObjects<Company>("companies", { query: q, limit, sorts: [{ propertyName: "fatturato_2025", direction: "DESCENDING" }] }).catch(() => ({ results: [] as Company[] })),
+    searchObjects<Contact>("contacts", { query: q, limit }).catch(() => ({ results: [] as Contact[] })),
+    searchObjects<Deal>("deals", { query: q, limit, sorts: [{ propertyName: "hs_lastmodifieddate", direction: "DESCENDING" }] }).catch(() => ({ results: [] as Deal[] })),
+  ]);
+  return { companies: companies.results ?? [], contacts: contacts.results ?? [], deals: deals.results ?? [] };
+}
+
 // ---------- owners (Brambilla's users, from utenti.csv) ----------
 
 interface OwnerRecord {
