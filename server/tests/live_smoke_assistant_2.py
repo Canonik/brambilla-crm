@@ -86,7 +86,7 @@ def linked(ot, id_, to):
 def numbers(text):
     out = set()
     for m in re.finditer(r"\d[\d.,]*", text):
-        s = m.group(0).rstrip(".,")
+        s = m.group(0)
         it = s.replace(".", "").replace(",", ".") if re.search(r",\d{1,2}$", s) else s.replace(",", "")
         try:
             out.add(round(float(it), 2))
