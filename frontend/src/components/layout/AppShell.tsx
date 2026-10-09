@@ -30,7 +30,7 @@ export const INLINE_ASSISTANT_ROUTES = new Set(["/", "/assistant"]);
 function Wordmark() {
   return (
     <div className="flex items-center gap-2.5 px-3">
-      <span className="inline-flex size-7 items-center justify-center rounded-md bg-gentian font-wide text-[15px] font-bold text-white">B</span>
+      <span className="inline-flex size-7 items-center justify-center rounded-md bg-gradient-to-br from-[#1a6bb8] to-[#0b3a6b] font-wide text-[15px] font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]">B</span>
       <div className="leading-tight">
         <div className="font-wide text-[14px] font-semibold tracking-tight text-ink">Brambilla</div>
         <div className="text-[11px] text-ink-3">Forniture CRM</div>
@@ -42,6 +42,7 @@ function Wordmark() {
 function Nav({ layoutId }: { layoutId: string }) {
   return (
     <nav className="flex flex-1 flex-col gap-0.5 px-2" aria-label="Main">
+      <p className="px-2 pb-1 text-[10px] font-semibold tracking-[0.14em] text-ink-3 uppercase" aria-hidden>Workspace</p>
       {NAV.map((item) => (
         <NavLink
           key={item.to}
@@ -56,7 +57,11 @@ function Nav({ layoutId }: { layoutId: string }) {
         >
           {({ isActive }) => (
             <>
-              {isActive ? <motion.span layoutId={layoutId} className="absolute inset-0 rounded-md bg-gentian-soft" transition={SPRING} aria-hidden /> : null}
+              {isActive ? (
+                <motion.span layoutId={layoutId} className="absolute inset-0 rounded-md bg-gentian-soft" transition={SPRING} aria-hidden>
+                  <span className="absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r-full bg-gentian" />
+                </motion.span>
+              ) : null}
               <item.icon className="relative size-4 shrink-0" aria-hidden />
               <span className="relative truncate">{item.label}</span>
             </>
@@ -112,7 +117,7 @@ export function AppShell() {
       )}
       aria-pressed={assistant.open && !inline}
     >
-      <AssistantMark size={20} />
+      <AssistantMark size={20} working />
       <span className="truncate">Ask the CRM</span>
       <span className="ml-auto text-[11px] font-normal text-ink-3">⌘J</span>
     </button>

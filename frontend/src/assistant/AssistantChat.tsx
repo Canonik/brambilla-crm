@@ -383,7 +383,7 @@ function Thinking() {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ duration: 0.2, ease: EASE_OUT }} className="flex gap-2.5">
       <AssistantMark className="mt-1" size={24} working />
-      <div className="rounded-lg border border-line bg-surface px-3.5 py-2.5 text-[13px] text-ink-2" role="status" aria-live="polite">
+      <div className="skeleton min-w-[240px] rounded-lg border border-line px-3.5 py-2.5 text-[13px] text-ink-2" role="status" aria-live="polite">
         <div className="flex items-center gap-2 font-medium text-ink">
           Reading the CRM
           <span className="flex gap-1" aria-hidden>
@@ -393,12 +393,12 @@ function Thinking() {
           </span>
           <span className="tnum text-[12px] font-normal text-ink-3">{elapsed}s</span>
         </div>
-        <ol className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-          {WORK_STEPS.map((label, i) => (
-            <li key={label} className={cn("inline-flex items-center gap-1.5", i < step ? "text-ink-2" : i === step ? "text-gentian" : "text-ink-3")}>
-              <span className={cn("size-1.5 rounded-full", i <= step ? "bg-gentian" : "bg-line-strong", i === step && "mark-working")} aria-hidden />
+        <ol className="mt-1.5 flex flex-col gap-1 text-[12px]">
+          {WORK_STEPS.slice(0, step + 1).map((label, i) => (
+            <motion.li key={label} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2, ease: EASE_OUT }} className={cn("inline-flex items-center gap-1.5", i < step ? "text-ink-3" : "text-gentian")}>
+              <span className={cn("size-1.5 rounded-full bg-gentian", i === step && "mark-working")} aria-hidden />
               {label}
-            </li>
+            </motion.li>
           ))}
         </ol>
         {slow ? <p className="mt-1.5 text-[12px] text-ink-3">This one needs several lookups. The assistant has up to a minute.</p> : null}
