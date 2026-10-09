@@ -38,6 +38,17 @@ interface AssistantApi {
 
 const Ctx = createContext<AssistantApi | null>(null);
 const STORAGE_KEY = "brambilla.crm.assistant";
+const EVIDENCE_KEY = "brambilla.crm.assistant.evidence";
+
+// Only the on/off preference is stored, never the evidence itself.
+function loadEvidencePreference(): boolean {
+  try {
+    const raw = window.localStorage.getItem(EVIDENCE_KEY);
+    return raw === null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
 
 function nowIso(): string {
   const d = new Date();
@@ -64,7 +75,7 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>(load);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [evidenceEnabled, setEvidenceEnabledState] = useState(false);
+  const [evidenceEnabled, setEvidenceEnabledState] = useState(loadEvidencePreference);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -165,6 +176,11 @@ export function AssistantProvider({ children }: { children: ReactNode }) {
 
   const setEvidenceEnabled = useCallback((enabled: boolean) => {
     setEvidenceEnabledState(enabled);
+    try {
+      window.localStorage.setItem(EVIDENCE_KEY, enabled ? "1" : "0");
+    } catch {
+      // ignore
+    }
     if (!enabled) setMessages((current) => current.map(({ evidence: _evidence, ...message }) => message));
   }, []);
 

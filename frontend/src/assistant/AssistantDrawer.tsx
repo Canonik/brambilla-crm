@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Maximize2, X } from "lucide-react";
 import { useAssistant } from "./AssistantContext";
-import { AssistantChat, AssistantMark } from "./AssistantChat";
+import { AssistantChat } from "./AssistantChat";
+import { AssistantMark } from "./AssistantMark";
 import { Button } from "@/components/ui/Button";
 import { cn } from "@/lib/cn";
 

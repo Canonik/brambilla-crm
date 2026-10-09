@@ -1,7 +1,7 @@
 import { cn } from "@/lib/cn";
 
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn("animate-pulse rounded-sm bg-surface-3", className)} aria-hidden />;
+  return <div className={cn("skeleton rounded-sm", className)} aria-hidden />;
 }
 
 export function SkeletonRows({ rows = 6, cols = 4 }: { rows?: number; cols?: number }) {
