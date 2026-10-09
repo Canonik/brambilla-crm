@@ -6,6 +6,9 @@ import {
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
+  type KeyboardCoordinateGetter,
   useDraggable,
   useDroppable,
   useSensor,
@@ -32,6 +35,20 @@ import { displayPipelineLabel, displayStageLabel, isLostStage, isWonStage } from
 import { useListParams } from "@/lib/useListParams";
 import { userName } from "@/api/users";
 
+// Pointer drags are matched by the cursor position; keyboard drags have no
+// cursor, so they fall back to the overlap of the moving card with a column.
+const collision: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  return hits.length ? hits : rectIntersection(args);
+};
+
+// Left and right arrows jump one column (cards are 288px wide plus a 12px gap).
+const columnStep: KeyboardCoordinateGetter = (event, { currentCoordinates }) => {
+  if (event.code === "ArrowRight") return { ...currentCoordinates, x: currentCoordinates.x + 300 };
+  if (event.code === "ArrowLeft") return { ...currentCoordinates, x: currentCoordinates.x - 300 };
+  return undefined;
+};
+
 const KEYS = ["pipeline", "mine"] as const;
 const DEFAULTS = { pipeline: "default" } as const;
 
@@ -48,7 +65,7 @@ export function DealsBoard() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: columnStep }),
   );
 
   const onDragStart = (e: DragStartEvent) => setActive((e.active.data.current as { deal: Deal } | undefined)?.deal ?? null);
@@ -139,7 +156,7 @@ export function DealsBoard() {
       ) : !pipeline ? (
         <EmptyState icon={<Kanban />} title="No pipelines yet" description="Pipelines are created by the reset and the migration." />
       ) : (
-        <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
+        <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
           <div className="relative flex min-h-0 flex-1 flex-col">
             <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto scroll-quiet p-4" data-board>
               {pipeline.stages.map((stage) => (
@@ -258,7 +275,9 @@ function DealCard({ deal, overlay, company }: { deal: Deal; overlay?: boolean; c
         if (!overlay && !isDragging) navigate(`/deals/${deal.id}`);
       }}
       onKeyDown={(e) => {
+        // Enter opens the deal; Space and the arrows belong to the drag sensor.
         if (e.key === "Enter" && !overlay) navigate(`/deals/${deal.id}`);
+        else if (!overlay) listeners?.onKeyDown?.(e);
       }}
       className={cn(
         "cursor-grab rounded-md border border-line bg-surface px-3 py-2.5 text-left shadow-card outline-none transition-shadow",

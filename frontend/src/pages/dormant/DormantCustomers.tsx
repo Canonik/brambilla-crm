@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Moon } from "lucide-react";
 import { useDormantCompanies } from "@/api/hooks";
@@ -41,6 +41,12 @@ export function DormantCustomers() {
   const navigate = useNavigate();
   const query = useDormantCompanies();
   const assistant = useAssistant();
+  // Sorting and filtering happen in the browser, so pull every page in the
+  // background (a few hundred rows each) to keep them correct for the whole list.
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = query;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "revenue", dir: -1 });
 
@@ -78,10 +84,10 @@ export function DormantCustomers() {
         }
       >
         <div className="flex flex-wrap items-center gap-2 pb-3">
-          <SearchInput value={q} onChange={setQ} placeholder="Filter loaded companies" className="w-72" />
+          <SearchInput value={q} onChange={setQ} placeholder="Filter by name, city, VAT or website" className="w-72" />
           {loaded.length ? (
             <span className="text-[12.5px] text-ink-3 tnum">
-              {withRevenue} of {loaded.length} loaded still bought something in 2025
+              {withRevenue} of {loaded.length}{query.hasNextPage ? " loaded so far" : ""} still bought something in 2025
             </span>
           ) : null}
         </div>
@@ -104,7 +110,7 @@ export function DormantCustomers() {
             }
           />
         ) : filtered.length === 0 ? (
-          <EmptyState icon={<Moon />} title={q ? "No loaded companies match" : "Nobody is dormant"} description={q ? "Load more or change the filter." : "Every customer with a won deal had some activity in 2025."} />
+          <EmptyState icon={<Moon />} title={q ? "No companies match" : "Nobody is dormant"} description={q ? "Try a different name, city or VAT number." : "Every customer with a won deal had some activity in 2025."} />
         ) : (
           <>
             <Table>
