@@ -58,3 +58,10 @@ oracle in `tests/reference` is being updated to the same rules.
   `GET /crm/v3/lists/object-type-id/0-2/name/Clienti%20dormienti` (URL-encoded name) and
   `GET /crm/v3/lists/{listId}/memberships`; `GET /crm/v4/objects/{type}/{id}/associations/{to}`.
 - Auth scheme simplified: Bearer header only, no cookie login endpoint needed.
+
+## 11:30, scope reduction
+
+No `/ui/api/*` endpoints and no `/ui/login` are needed any more (contract section 5): the SPA
+uses only the HubSpot endpoints, `/health` and `/__agente`. Optional P4 when everything else is
+green: `POST /__agente?trace=1` adds a `trace` array next to `reply`; without the parameter the
+body stays exactly `{"reply": "..."}`.

@@ -128,26 +128,17 @@ Errors: `{"status":"error","message":"...","correlationId":"<uuid>","category":"
 every authenticated reply; enforcement threshold is generous (env `RATE_LIMIT_PER_10S`,
 default 1000) so the organizers' parallel suites never see a 429.
 
-## 5. UI-facing endpoints (implemented by Core, consumed by the SPA)
+## 5. UI-facing endpoints: none
 
-All under `/ui/api`, token or session cookie, JSON, English-neutral field names. These are
-convenience aggregations over the same tables as the CRM API, nothing is computed twice.
+Decided 11:30: the SPA runs entirely on `/crm/v3`, `/crm/v4`, `/health` and `/__agente`.
+Core builds no `/ui/api/*` endpoints and no `/ui/login`. The SPA's typed client is
+`frontend/src/api/endpoints.ts`. What the board and lists rely on: exact `total` in search
+replies, association filters in search (section 10), `associations` param on GET by id.
 
-| Endpoint | Returns |
-|---|---|
-| `GET /ui/api/summary` | counts per object type, migration timestamp, dormant count |
-| `GET /ui/api/companies?q=&page=&limit=&classe=` | `{items:[{id,name,domain,city,state,partita_iva,fatturato_2025,classe_cliente}],total}` |
-| `GET /ui/api/companies/{id}` | company properties plus `contacts[]`, `deals[]` (with pipeline/stage labels), `tickets[]`, `timeline[]` (notes/calls/emails/meetings of its contacts and deals, newest first, max 200) |
-| `GET /ui/api/contacts?q=&page=&limit=` | contacts with company name |
-| `GET /ui/api/deals/board?pipeline=default` | `{pipeline:{id,label}, stages:[{id,label,probability,isClosed,total_amount,deals:[{id,dealname,amount,deal_currency_code,closedate,commerciale,company:{id,name}}]}]}` |
-| `PATCH /ui/api/deals/{id}/stage` | body `{dealstage}`; moves a deal (drag and drop) through the same path as the API so R10/R11 fire |
-| `GET /ui/api/tickets?stage=&q=&page=` | tickets with stage label, company, contact |
-| `GET /ui/api/dormant` | members of the list `Clienti dormienti` with company fields and last activity date |
-| `GET /ui/api/users` | active users from the migration (email, name, role) |
-| `POST /ui/api/assistant` | body `{"context":{"now","user"},"messages":[...]}` like `/__agente`; reply `{"reply","trace":[{"step","tool","arguments","result_summary","records":[{"type","id","label"}],"ms"}]}`. Same engine as `/__agente`; `trace` feeds the execution inspector panel. |
-
-Core documents the implemented list in `server/API_FOR_UI.md`; the UI uses one typed client
-(`frontend/src/lib/api.ts`) and no production mocks.
+Execution inspector (P4, only if Core has time): `POST /__agente?trace=1` replies
+`{"reply": "...", "trace": [{"tool", "input", "output", "summary"}]}`; without the query
+parameter the reply is exactly `{"reply": "..."}` as the brief requires. The organizers never
+send the parameter, so their shape check cannot be affected.
 
 ## 6. UI routes (SPA) and `/health.ui`
 
@@ -199,9 +190,9 @@ the UI stage falls back to a placeholder page so the API keeps scoring.
   Acceptance tests you can run against your server: `BASE_URL=http://127.0.0.1:8000
   CRM_TOKEN=dev-token .venv/bin/pytest -q tests/acceptance` from the repo root on `main`
   (`git show main:tests/acceptance/<file>` or merge `main` into `agent/core`).
-- **UI**: the dormant customers page lives at `/dormant`. Sign-in page posts the token to
-  `POST /ui/login` (cookie session) and then every call goes to the real `/crm/...` and
-  `/ui/api/...` endpoints with `credentials: "include"`. Keep the mock router for tests only.
+- **UI**: the dormant customers page lives at `/dormant`. Sign-in screen stores the token in
+  `localStorage`, every call carries the bearer header (section 2). Mocks only behind
+  `VITE_USE_MOCKS`.
 - **Both**: commit on your branch at every working milestone; the coordinator merges `main`
   from the branches, not from worktrees.
 
