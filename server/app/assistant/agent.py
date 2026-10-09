@@ -4,7 +4,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
@@ -19,13 +21,31 @@ log = logging.getLogger("crm.assistant")
 MAX_ROUNDS = 10
 TURN_BUDGET_S = 50.0
 MODEL_TIMEOUT_S = 40.0
+HARD_TURN_LIMIT_S = 55.0
+FALLBACK_RESERVE_S = 0.5
+TRANSIENT_RETRY_MIN_REMAINING_S = 15.0
 MAX_ATTACHMENT_CHARS = 30_000
 MAX_TOOL_RESULT_CHARS = 12_000
+
+READ_TOOL_NAMES = frozenset({
+    "search_companies", "search_contacts", "search_deals", "search_tickets",
+    "get_record", "company_overview", "list_deal_line_items", "list_activities",
+    "revenue", "deal_stats", "my_customers", "list_users", "pipelines",
+    "dormant_list", "find_by_legacy_id", "search_products", "preview_attachment",
+})
 
 ITALIAN_MONTHS = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
 
 
 # ---------------------------------------------------------------- model client (swappable for tests)
+class ModelHTTPError(RuntimeError):
+    """An OpenRouter HTTP error whose status is safe for retry classification."""
+
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        super().__init__(f"model error {status_code}: {detail[:300]}")
+
+
 def openrouter_chat(messages: list[dict], tools: list[dict], *, timeout: float = MODEL_TIMEOUT_S) -> dict:
     """One chat-completions call. Returns the assistant message dict ({content, tool_calls})."""
     if not config.OPENROUTER_API_KEY:
@@ -39,12 +59,22 @@ def openrouter_chat(messages: list[dict], tools: list[dict], *, timeout: float =
         "max_tokens": 1500,
     }
     headers = {"Authorization": f"Bearer {config.OPENROUTER_API_KEY}", "Content-Type": "application/json", "HTTP-Referer": "https://brambilla-crm.local", "X-Title": "Brambilla CRM"}
-    with httpx.Client(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
+    with httpx.Client(timeout=httpx.Timeout(timeout, connect=min(10.0, timeout))) as client:
         r = client.post(config.OPENROUTER_URL, headers=headers, json=body)
     if r.status_code >= 400:
+        if r.status_code in (429, 502, 503):
+            raise ModelHTTPError(r.status_code, r.text)
         raise RuntimeError(f"model error {r.status_code}: {r.text[:300]}")
     data = r.json()
     if "error" in data and not data.get("choices"):
+        error = data["error"]
+        code = error.get("code") if isinstance(error, dict) else None
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            code = None
+        if code in (429, 502, 503):
+            raise ModelHTTPError(code, str(error))
         raise RuntimeError(f"model error: {str(data['error'])[:300]}")
     choice = (data.get("choices") or [{}])[0] or {}
     if choice.get("error"):
@@ -184,18 +214,65 @@ def collect_attachments(body: dict) -> list[dict]:
     return out
 
 
-def _tool_result_text(result) -> str:
+def _bounded_result_copy(value, *, max_rows: int, max_string_chars: int, stats: dict[str, int]):
+    if isinstance(value, dict):
+        return {str(k): _bounded_result_copy(v, max_rows=max_rows, max_string_chars=max_string_chars, stats=stats) for k, v in value.items()}
+    if isinstance(value, list):
+        kept = value[:max_rows]
+        stats["omitted_rows"] += len(value) - len(kept)
+        return [_bounded_result_copy(v, max_rows=max_rows, max_string_chars=max_string_chars, stats=stats) for v in kept]
+    if isinstance(value, str) and len(value) > max_string_chars:
+        omitted = len(value) - max_string_chars
+        stats["omitted_characters"] += omitted
+        return value[:max_string_chars] + f"... [{omitted} caratteri omessi]"
+    return value
+
+
+def _compacted_tool_result(result) -> dict:
+    """Return bounded, valid JSON data with explicit omission counts."""
+    for max_rows, max_string_chars in ((10, 2000), (5, 1000), (3, 500), (1, 300), (1, 100)):
+        stats = {"omitted_rows": 0, "omitted_characters": 0}
+        compacted = _bounded_result_copy(result, max_rows=max_rows, max_string_chars=max_string_chars, stats=stats)
+        if not isinstance(compacted, dict):
+            compacted = {"result": compacted}
+        compacted["result_compacted"] = True
+        compacted["omitted_rows"] = stats["omitted_rows"]
+        if stats["omitted_characters"]:
+            compacted["omitted_characters"] = stats["omitted_characters"]
+        if len(json.dumps(compacted, ensure_ascii=False, default=str)) <= MAX_TOOL_RESULT_CHARS:
+            return compacted
+
+    # Pathological records can have thousands of properties. Keep count/total
+    # fields and the first row of the first list, with every omission explicit.
+    source = result if isinstance(result, dict) else {"result": result}
+    summary = {
+        str(k): v for k, v in source.items()
+        if not isinstance(v, (dict, list)) and any(word in str(k).lower() for word in ("total", "count", "returned", "limit", "truncated"))
+    }
+    list_item = next(((k, v[0]) for k, v in source.items() if isinstance(v, list) and v), None)
+    stats = {"omitted_rows": sum(len(v) for v in source.values() if isinstance(v, list)), "omitted_characters": 0}
+    if list_item:
+        key, first = list_item
+        summary[str(key)] = [_bounded_result_copy(first, max_rows=1, max_string_chars=100, stats=stats)]
+        stats["omitted_rows"] -= 1
+    summary.update({"result_compacted": True, "omitted_rows": max(0, stats["omitted_rows"])})
+    if stats["omitted_characters"]:
+        summary["omitted_characters"] = stats["omitted_characters"]
+    return summary
+
+
+def _tool_result_text(result, *, compact: bool = True) -> str:
     try:
         s = json.dumps(result, ensure_ascii=False, default=str)
     except Exception:
         s = str(result)
-    if len(s) > MAX_TOOL_RESULT_CHARS:
-        s = s[:MAX_TOOL_RESULT_CHARS] + "... [risultato troncato]"
+    if compact and len(s) > MAX_TOOL_RESULT_CHARS:
+        s = json.dumps(_compacted_tool_result(result), ensure_ascii=False, default=str)
     return s
 
 
 def handle_conversation(body: dict, *, include_trace: bool = False) -> str | tuple[str, dict | None]:
-    t0 = time.time()
+    t0 = time.monotonic()
     if not isinstance(body, dict):
         body = {}
     msgs, now, user_email = build_messages(body)
@@ -227,22 +304,106 @@ def _fallback_reply(tctx: ToolContext, last_error, finish):
     return finish("Non sono riuscito a completare la richiesta nel tempo disponibile e non ho modificato nulla nel CRM. Puoi riformularla in modo più specifico?")
 
 
+class _SynchronizedObserver:
+    """Keep evidence bookkeeping coherent while read tools run concurrently."""
+
+    def __init__(self, observer: EvidenceTrace):
+        self._observer = observer
+        self._lock = threading.Lock()
+
+    def begin(self, *args, **kwargs):
+        with self._lock:
+            return self._observer.begin(*args, **kwargs)
+
+    def returned(self, *args, **kwargs):
+        with self._lock:
+            return self._observer.returned(*args, **kwargs)
+
+    def transaction_finished(self, *args, **kwargs):
+        with self._lock:
+            return self._observer.transaction_finished(*args, **kwargs)
+
+    def failed(self, *args, **kwargs):
+        with self._lock:
+            return self._observer.failed(*args, **kwargs)
+
+
+def _is_transient_model_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        return True
+    status = getattr(exc, "status_code", None)
+    if status is None and isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        status = exc.response.status_code
+    if status in (429, 502, 503):
+        return True
+    # Scripted clients in tests commonly preserve openrouter_chat's old error text.
+    text = str(exc).lower()
+    return any(marker in text for marker in ("model error 429", "model error 502", "model error 503"))
+
+
+def _model_timeout(t0: float) -> float | None:
+    elapsed = time.monotonic() - t0
+    if elapsed >= TURN_BUDGET_S:
+        return None
+    available = HARD_TURN_LIMIT_S - FALLBACK_RESERVE_S - elapsed
+    if available <= 0:
+        return None
+    return min(MODEL_TIMEOUT_S, available)
+
+
+def _call_model(msgs: list[dict], t0: float) -> dict:
+    for attempt in range(2):
+        timeout = _model_timeout(t0)
+        if timeout is None:
+            raise TimeoutError("assistant turn budget exhausted")
+        try:
+            return MODEL_CLIENT(msgs, TOOL_SCHEMAS, timeout=timeout)
+        except Exception as exc:
+            remaining = HARD_TURN_LIMIT_S - (time.monotonic() - t0)
+            if attempt or not _is_transient_model_error(exc) or remaining < TRANSIENT_RETRY_MIN_REMAINING_S:
+                raise
+            time.sleep(1.0)
+    raise AssertionError("unreachable")
+
+
+def _prepared_tool_call(tc: dict) -> tuple[str, dict | None]:
+    name = tc["function"]["name"]
+    try:
+        args = json.loads(tc["function"]["arguments"] or "{}")
+        if not isinstance(args, dict):
+            args = {}
+    except json.JSONDecodeError:
+        args = None
+    return name, args
+
+
+def _execute_tool_call(tc: dict, tctx: ToolContext, observer) -> tuple[str, dict | None, object, str]:
+    name, args = _prepared_tool_call(tc)
+    if args is None:
+        result = {"error": "argomenti non in formato JSON valido"}
+    else:
+        try:
+            result = run_tool(tctx, name, args, observer=observer)
+        except Exception as exc:  # defensive for swappable dispatchers in tests
+            log.exception("tool %s failed outside its normal error boundary", name)
+            result = {"error": f"errore interno: {type(exc).__name__}: {str(exc)[:200]}"}
+    text = _tool_result_text(result, compact=name in READ_TOOL_NAMES)
+    log.info("tool %s(%s) -> %s", name, json.dumps(args, ensure_ascii=False)[:200], text[:160])
+    return name, args, result, text
+
+
 def _run_rounds(msgs: list[dict], tctx: ToolContext, observer: EvidenceTrace, t0: float, finish):
     last_error = None
+    synchronized_observer = _SynchronizedObserver(observer)
     for round_no in range(MAX_ROUNDS):
-        elapsed = time.time() - t0
-        if elapsed > TURN_BUDGET_S:
+        elapsed = time.monotonic() - t0
+        if elapsed >= TURN_BUDGET_S or elapsed >= HARD_TURN_LIMIT_S - FALLBACK_RESERVE_S:
             break
         try:
-            msg = MODEL_CLIENT(msgs, TOOL_SCHEMAS, timeout=min(MODEL_TIMEOUT_S, max(8.0, TURN_BUDGET_S + 5 - elapsed)))
-        except TypeError:
-            msg = MODEL_CLIENT(msgs, TOOL_SCHEMAS)
+            msg = _call_model(msgs, t0)
         except Exception as e:
             last_error = e
             log.warning("model call failed (round %d): %s", round_no, e)
-            if time.time() - t0 < TURN_BUDGET_S - 10 and round_no < MAX_ROUNDS - 1:
-                time.sleep(1.0)
-                continue
             break
         tool_calls = msg.get("tool_calls") or []
         content = msg.get("content") or ""
@@ -256,19 +417,19 @@ def _run_rounds(msgs: list[dict], tctx: ToolContext, observer: EvidenceTrace, t0
             fn = tc.get("function") or {}
             assistant_msg["tool_calls"].append({"id": tc.get("id") or f"call_{round_no}_{len(assistant_msg['tool_calls'])}", "type": "function", "function": {"name": fn.get("name"), "arguments": fn.get("arguments") if isinstance(fn.get("arguments"), str) else json.dumps(fn.get("arguments") or {})}})
         msgs.append(assistant_msg)
-        for tc in assistant_msg["tool_calls"]:
-            name = tc["function"]["name"]
-            try:
-                args = json.loads(tc["function"]["arguments"] or "{}")
-                if not isinstance(args, dict):
-                    args = {}
-            except json.JSONDecodeError:
-                args = None
-            if args is None:
-                result = {"error": "argomenti non in formato JSON valido"}
-            else:
-                result = run_tool(tctx, name, args, observer=observer)
-            log.info("tool %s(%s) -> %s", name, json.dumps(args, ensure_ascii=False)[:200], _tool_result_text(result)[:160])
-            msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": _tool_result_text(result)})
+        calls = assistant_msg["tool_calls"]
+        names = [tc["function"]["name"] for tc in calls]
+        if len(calls) > 1 and all(name in READ_TOOL_NAMES for name in names):
+            def run_read(tc):
+                read_ctx = ToolContext(tctx.now, tctx.user_email)
+                read_ctx.attachments = tctx.attachments
+                return _execute_tool_call(tc, read_ctx, synchronized_observer)
+
+            with ThreadPoolExecutor(max_workers=min(4, len(calls)), thread_name_prefix="assistant-read") as pool:
+                outcomes = list(pool.map(run_read, calls))
+        else:
+            outcomes = [_execute_tool_call(tc, tctx, synchronized_observer) for tc in calls]
+        for tc, (_, _, _, text) in zip(calls, outcomes):
+            msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": text})
     # out of rounds / budget / model failure: never claim more than what was done
     return _fallback_reply(tctx, last_error, finish)
