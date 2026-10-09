@@ -1,7 +1,9 @@
 """Assistant tool layer driven by a scripted fake model (no network, no key)."""
+import datetime as dt
 import json
 
 from app.assistant import agent
+from app.assistant.tools import ToolContext, run_tool
 
 from .conftest import H
 
@@ -27,6 +29,69 @@ def _setup(api):
     comp = api.post("/crm/v3/objects/companies", headers=H, json={"properties": {"name": "Nuova Serramenti Mazza S.r.l.", "domain": "nuovaserramentimazza.it", "partita_iva": "01234567890", "city": "Lecco"}}).json()
     deal = api.post("/crm/v3/objects/deals", headers=H, json={"properties": {"dealname": "Fornitura serramenti Mazza", "amount": "12500", "deal_currency_code": "EUR", "dealstage": "contractsent", "commerciale": "anna.sala@brambillaforniture.it"}, "associations": [{"to": {"id": comp["id"]}, "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 341}]}]}).json()
     return comp, deal
+
+
+def test_list_deal_line_items_returns_associated_product_without_model(api):
+    _, deal = _setup(api)
+    product = api.post("/crm/v3/objects/products", headers=H, json={"properties": {
+        "name": "Porta tagliafuoco REI 120",
+        "hs_sku": "PT-REI120",
+        "price": "800",
+    }}).json()
+    line_item = api.post("/crm/v3/objects/line_items", headers=H, json={
+        "properties": {
+            "name": "Porta REI 120 su misura",
+            "hs_sku": "PT-REI120",
+            "quantity": "2",
+            "price": "800",
+            "hs_discount_percentage": "10",
+            "hs_line_item_currency_code": "EUR",
+            "id_legacy": "RIGA-7",
+        },
+        "associations": [
+            {"to": {"id": deal["id"]}, "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 20}]},
+            {"to": {"id": product["id"]}, "types": [{"associationCategory": "USER_DEFINED", "associationTypeId": 901}]},
+        ],
+    }).json()
+
+    result = run_tool(
+        ToolContext(dt.datetime(2026, 12, 2, 10, tzinfo=dt.timezone.utc), CTX["user"]),
+        "list_deal_line_items",
+        {"deal_id": deal["id"], "limit": 50},
+    )
+
+    assert result["deal_id"] == deal["id"]
+    assert result["total"] == result["returned"] == 1
+    assert result["limit"] == 25
+    assert result["truncated"] is False and result["paging"]["next"] is None
+    assert result["results"] == [{
+        "id": line_item["id"],
+        "id_legacy": "RIGA-7",
+        "name": "Porta REI 120 su misura",
+        "sku": "PT-REI120",
+        "quantity": "2",
+        "unit_price": "800",
+        "discount": {"percentage": "10", "unit_amount": None, "total_amount": "160.00"},
+        "amount": "1440.00",
+        "currency": "EUR",
+        "product": {
+            "id": product["id"],
+            "name": "Porta tagliafuoco REI 120",
+            "sku": "PT-REI120",
+            "unit_price": "800",
+        },
+    }]
+
+
+def test_list_deal_line_items_rejects_invalid_deal_without_model(api):
+    result = run_tool(
+        ToolContext(dt.datetime(2026, 12, 2, 10, tzinfo=dt.timezone.utc), CTX["user"]),
+        "list_deal_line_items",
+        {"deal_id": "not-a-deal"},
+    )
+
+    assert result["status"] == 404
+    assert "not-a-deal" in result["error"]
 
 
 def test_mark_deal_won_runs_r10_and_reports(api, monkeypatch):
