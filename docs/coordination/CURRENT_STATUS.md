@@ -12,13 +12,13 @@ Workers never edit this file. Each worker keeps its own file in this directory o
 | Commit | Pushed | Railway | Verified in production | Verdict |
 |---|---|---|---|---|
 | 75d0043 | 12:32 | success | /health 200, SPA served, 401 without token | previous release, no authenticated checks run by the current coordinator |
-| a6e39d4 | 12:52 | success 12:53 | /health 200, SPA served, 401 without token | candidate for `hackitaly-good-001` once authenticated checks pass |
+| a6e39d4 | 12:52 | success 12:53 | /health 200, SPA bundle hash matches local build, 401 without token | `hackitaly-good-001` (authenticated production checks still pending the token) |
 
 Local evidence on a6e39d4 (server on 127.0.0.1:8040, database `brambilla_release`):
 `server/tests` 26 passed; `tests/acceptance/test_form_check.py` + `test_api_conformity.py` 26 passed;
-`npm ci && npm run build` exit 0; migration, rules and durability suites running (see Log).
+`test_migration.py` + `test_rules_behavior.py` 32 passed (migration 26.9 s locally); `npm ci && npm run build` exit 0.
 
-Known-good tags: none yet. Convention `hackitaly-good-NNN` on `main`.
+Known-good tags: `hackitaly-good-001` = a6e39d4. Convention `hackitaly-good-NNN` on `main`.
 
 Blocked: authenticated production checks and the Railway CLI. Needs the human to run
 `railway login` or to put `CRM_TOKEN` and `OPENROUTER_API_KEY` in `~/.brambilla-secrets.env`.
@@ -46,21 +46,21 @@ Legend: PASS = test evidence on a6e39d4; PROD = verified on production; UNTESTED
 
 | Requirement | Points | Owner | Implementation | Local tests | Production evidence | Risk |
 |---|---|---|---|---|---|---|
-| R1 companies | 4 | 2 | migration, dedup by domain, `hs_additional_domains` | `test_migration.py` (running) | none (needs token) | medium: hidden export shapes |
-| R2 contacts | 4 | 2 | migration, dedup by email and by name in company | `test_migration.py` (running) | none | medium |
-| R3 deals | 6 | 2 | migration, line-item totals, active commerciale | `test_migration.py` (running) | none | medium |
-| R4 products and line items | 4 | 2 | migration | `test_migration.py` (running) | none | low |
-| R5 tickets | 4 | 2 | migration, `Da:` fallback | `test_migration.py` (running) | none | low |
-| R6 activities | 4 | 2 | migration into notes, calls, emails, meetings | `test_migration.py` (running) | none | low |
-| R7 partita_iva unique, 409 | 4 | 3 | `rules.py`, partial unique index | `test_rules_behavior.py` (running) | none | low |
+| R1 companies | 4 | 2 | migration, dedup by domain, `hs_additional_domains` | `test_migration.py` PASS 12:55 | none (needs token) | medium: hidden export shapes |
+| R2 contacts | 4 | 2 | migration, dedup by email and by name in company | `test_migration.py` PASS 12:55 | none | medium |
+| R3 deals | 6 | 2 | migration, line-item totals, active commerciale | `test_migration.py` PASS 12:55 | none | medium |
+| R4 products and line items | 4 | 2 | migration | `test_migration.py` PASS 12:55 | none | low |
+| R5 tickets | 4 | 2 | migration, `Da:` fallback | `test_migration.py` PASS 12:55 | none | low |
+| R6 activities | 4 | 2 | migration into notes, calls, emails, meetings | `test_migration.py` PASS 12:55 | none | low |
+| R7 partita_iva unique, 409 | 4 | 3 | `rules.py`, partial unique index | `test_rules_behavior.py` PASS 12:55 | none | low |
 | R8 fatturato_2025 and class | 6 | 2 | computed at migration | oracle match 100 percent on sample (11:35) | none | medium: only post-migration, not recomputed on edits |
 | R9 dormant list | 4 | 2 | static list at migration | 936/936 on sample | none | low |
-| R10 won deal ticket | 4 | 3 | `rules.py` on stage transition | `test_rules_behavior.py` (running) | none | low |
-| R11 lost deal task | 3 | 3 | `rules.py` | `test_rules_behavior.py` (running) | none | low |
-| R12 contact finds company | 3 | 3 | `rules.py` on create and email change, migration | `test_rules_behavior.py` (running) | none | low |
+| R10 won deal ticket | 4 | 3 | `rules.py` on stage transition | `test_rules_behavior.py` PASS 12:55 | none | low |
+| R11 lost deal task | 3 | 3 | `rules.py` | `test_rules_behavior.py` PASS 12:55 | none | low |
+| R12 contact finds company | 3 | 3 | `rules.py` on create and email change, migration | `test_rules_behavior.py` PASS 12:55 | none | low |
 | R13 assistant | 30 | 2 (tools), 5 (verification) | OpenRouter tool loop, 19 tools, evidence observer off by default | `server/tests/test_assistant.py` scripted model, 26 passed | none; real-model end-to-end never run by this coordinator | HIGH: untested against the real model and the organizer flow |
 | API conformity | 10 | 3 | HubSpot v3/v4 shapes, date-versioned contacts route | `test_api_conformity.py` 26 passed | 401 envelope PROD | medium |
-| Durability | 10 | 3 | PostgreSQL, metadata preserved on restart (77c1f22) | `test_durability_local.py` (running), restart test on agent/score-restart-fix | none | medium: Railway latency under 20 readers unmeasured |
+| Durability | 10 | 3 | PostgreSQL, metadata preserved on restart (77c1f22) | `test_durability_local.py` PASS 12:55, restart test on agent/score-restart-fix | none | medium: Railway latency under 20 readers unmeasured |
 | Jury: UI | 20 percent of top 6 | 1 | SPA at `/companies`, `/deals`, `/dormant`, `/tickets`, `/assistant` | vitest, build | SPA loads PROD | medium |
 | Jury: choice sheet | with UI | 5, helper e7 | `docs/CHOICE_SHEET_DRAFT.md` | n/a | n/a | fill 15:00 to 15:30 |
 
@@ -73,3 +73,4 @@ and 20-reader latency measurement (Agent 3 locally, Coordinator on Railway after
 - 12:45 Coordinator takeover. `origin/main` 75d0043 deployed; local `main` 04c3c32 diverged.
 - 12:51 Merge of 75d0043 into main (conflict in `run_tool` resolved keeping writes rollback and observer): a6e39d4.
 - 12:52 Pushed a6e39d4; Railway success 12:53; health, SPA and 401 verified.
+- 12:55 Migration and rules suites 32 passed on a6e39d4; tagged `hackitaly-good-001`.
