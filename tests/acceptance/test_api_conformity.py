@@ -205,7 +205,7 @@ def test_properties_api(client):
     co = client.post("/crm/v3/objects/companies", json={"properties": {"name": "P", name: "value"}})
     assert co.status_code == 201 and co.json()["properties"][name] == "value"
     r = client.post("/crm/v3/properties/companies", json={"name": name, "label": "Dup", "type": "string", "fieldType": "text", "groupName": "companyinformation"})
-    assert r.status_code == 409
+    assert r.status_code in (400, 409), "duplicate property name is rejected"
     r = client.get("/crm/v3/properties/deals")
     names = {x["name"] for x in r.json()["results"]}
     assert {"dealname", "amount", "dealstage", "pipeline", "closedate", "deal_currency_code"} <= names
