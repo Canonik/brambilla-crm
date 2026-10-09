@@ -1,6 +1,6 @@
 import datetime as dt
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 UTC = dt.timezone.utc
 
@@ -108,6 +108,8 @@ def normalize_number(value) -> str | None:
                 d = Decimal(s2)
             except InvalidOperation:
                 return None
+    if not d.is_finite():
+        return None
     if d == d.to_integral_value():
         return str(int(d))
     s = format(d.normalize(), "f")
@@ -115,7 +117,7 @@ def normalize_number(value) -> str | None:
 
 
 def fmt_money(x: float | Decimal) -> str:
-    d = Decimal(str(x)).quantize(Decimal("0.01"))
+    d = Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     s = format(d, "f")
     return s
 
@@ -129,6 +131,20 @@ def valid_email(s: str) -> bool:
     if ".." in s or s.startswith(".") or "@." in s or ".@" in s:
         return False
     return bool(EMAIL_RE.match(s))
+
+
+MAX_RECORD_ID = 2**63 - 1
+
+
+def parse_record_id(value) -> int | None:
+    """A record id as stored (BIGINT): digits only, in range; anything else is None."""
+    if value is None or isinstance(value, bool):
+        return None
+    s = str(value).strip()
+    if not s.isdigit():
+        return None
+    v = int(s)
+    return v if v <= MAX_RECORD_ID else None
 
 
 def email_domain(email: str) -> str | None:

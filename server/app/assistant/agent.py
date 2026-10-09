@@ -46,8 +46,14 @@ def openrouter_chat(messages: list[dict], tools: list[dict], *, timeout: float =
     data = r.json()
     if "error" in data and not data.get("choices"):
         raise RuntimeError(f"model error: {str(data['error'])[:300]}")
-    choice = (data.get("choices") or [{}])[0]
+    choice = (data.get("choices") or [{}])[0] or {}
+    if choice.get("error"):
+        raise RuntimeError(f"model error: {str(choice['error'])[:300]}")
+    if str(choice.get("finish_reason") or "").lower() in ("error", "content_filter"):
+        raise RuntimeError(f"model finish_reason={choice.get('finish_reason')}")
     msg = choice.get("message") or {}
+    if not isinstance(msg, dict):
+        raise RuntimeError("model reply without a message")
     usage = data.get("usage") or {}
     log.info("model call: %s tool_calls, usage=%s", len(msg.get("tool_calls") or []), usage)
     return msg
@@ -99,7 +105,9 @@ COME LAVORARE
 - Per segnare una trattativa vinta/persa usa update_record con dealstage 'Vinta'/'Persa' (o 'Rinnovato'/'Non rinnovato' nella pipeline Rinnovi); per chiudere un ticket hs_pipeline_stage 'Chiuso'. Date in formato YYYY-MM-DD, importi come numeri (es. 12500.50), valute EUR/USD/GBP.
 - Nuove trattative: pipeline Vendite (id 'default') fase 'Contatto' salvo indicazioni, commerciale = chi scrive salvo indicazioni, associa azienda e contatti indicati. Nuovi ticket: pipeline Assistenza fase Aperto, assegnatario = chi scrive salvo indicazioni. Note/chiamate/email/riunioni: autore = chi scrive, associate al contatto e/o alla trattativa indicati. Nuovi contatti: nome, cognome, email, telefono, associali all'azienda indicata.
 - Fatturato: per "quanto abbiamo fatturato con X nel 2025" usa revenue (regola R8: trattative Vinte/Rinnovate chiuse nell'anno, storni sottratti, USD x0,92, GBP x1,17); per altri anni usa revenue con year. La classe cliente è A (>=100.000), B (>=20.000), C (>0).
-- Allegati: i file allegati sono CSV di Sinergia (separatore ';'). Leggili dal testo del messaggio e usa create_records_bulk o i singoli strumenti; riferisci quanti record hai creato e gli eventuali errori riga per riga.
+- Allegati: i file allegati sono CSV di Sinergia (separatore ';', colonne come nome/cognome/email/telefono/id_azienda/tipo, titolo/importo/fase/id_commerciale, codice_articolo/prezzo_listino...). Non ricopiare le righe a mano: usa preview_attachment per vedere come verrebbero importate (tipo di record, proprietà, aziende/contatti collegati, righe già esistenti) e rispondere a domande sull'allegato; usa import_attachment solo quando l'utente chiede di importare o aggiungere quei dati. Riferisci quanti record hai creato, quali esistevano già e gli errori riga per riga.
+- Codici di Sinergia: se l'utente cita un codice (es. "il ticket 595833", "l'azienda 264566") usa find_by_legacy_id o il parametro id_legacy delle ricerche. Articoli del listino (BF-01234): search_products.
+- Colleghi: commerciale e assegnatario si possono indicare per nome o email; gli strumenti rifiutano gli ex dipendenti (R3): in quel caso spiega e non fare altro.
 - Numeri in formato italiano nella risposta (es. 12.345,67 €), date in forma leggibile. Cita sempre nomi, email, importi e id dei record toccati.
 - Dopo ogni scrittura verifica il risultato (ok/error) e riferisci esattamente ciò che è stato fatto; se un'operazione fallisce, dillo e non dichiarare mai fatto ciò che non lo è.
 - Se la conversazione contiene già tue domande e la risposta dell'utente, prosegui da lì senza ripetere le domande.
@@ -156,6 +164,24 @@ def build_messages(body: dict) -> tuple[list[dict], dt.datetime, str | None]:
     return msgs, now, user_email
 
 
+def collect_attachments(body: dict) -> list[dict]:
+    """Every CSV attachment of the conversation, oldest first, for the attachment tools."""
+    out: list[dict] = []
+    for mi, m in enumerate(body.get("messages") or []):
+        if not isinstance(m, dict) or (m.get("role") or "user").lower() != "user":
+            continue
+        for att in m.get("attachments") or []:
+            if not isinstance(att, dict):
+                continue
+            content = att.get("content")
+            if content is None:
+                content = ""
+            elif not isinstance(content, str):
+                content = json.dumps(content, ensure_ascii=False)
+            out.append({"index": len(out) + 1, "name": att.get("name") or f"allegato-{len(out) + 1}.csv", "content_type": att.get("content_type") or "text/csv", "content": content, "message_index": mi})
+    return out
+
+
 def _tool_result_text(result) -> str:
     try:
         s = json.dumps(result, ensure_ascii=False, default=str)
@@ -179,6 +205,27 @@ def handle_conversation(body: dict, *, include_trace: bool = False) -> str | tup
     if len(msgs) == 1:
         return finish("Ciao! Dimmi cosa ti serve dal CRM: posso cercare aziende, contatti, trattative e ticket, aggiornarli o rispondere a domande sui dati.")
     tctx = ToolContext(now, user_email)
+    tctx.attachments = collect_attachments(body)
+    last_error = None
+    try:
+        return _run_rounds(msgs, tctx, observer, t0, finish)
+    except Exception as e:  # pragma: no cover - defensive: tool/model layers already catch their own errors
+        log.exception("assistant turn failed after %d writes", len(tctx.writes))
+        last_error = e
+    return _fallback_reply(tctx, last_error, finish)
+
+
+def _fallback_reply(tctx: ToolContext, last_error, finish):
+    """Out of rounds, out of time, or a failure: say exactly what was done, never more."""
+    done = tctx.writes
+    if done:
+        return finish("Ho eseguito queste operazioni nel CRM: " + "; ".join(done) + ". Non sono riuscito a completare il resto della richiesta nel tempo disponibile: dimmi se vuoi che continui.")
+    if last_error is not None:
+        return finish("Mi dispiace, in questo momento non riesco a contattare il modello o a completare l'operazione. Non ho modificato nulla nel CRM: riprova tra poco o riformula la richiesta.")
+    return finish("Non sono riuscito a completare la richiesta nel tempo disponibile e non ho modificato nulla nel CRM. Puoi riformularla in modo più specifico?")
+
+
+def _run_rounds(msgs: list[dict], tctx: ToolContext, observer: EvidenceTrace, t0: float, finish):
     last_error = None
     for round_no in range(MAX_ROUNDS):
         elapsed = time.time() - t0
@@ -222,9 +269,4 @@ def handle_conversation(body: dict, *, include_trace: bool = False) -> str | tup
             log.info("tool %s(%s) -> %s", name, json.dumps(args, ensure_ascii=False)[:200], _tool_result_text(result)[:160])
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": _tool_result_text(result)})
     # out of rounds / budget / model failure: never claim more than what was done
-    done = tctx.writes
-    if done:
-        return finish("Ho eseguito queste operazioni nel CRM: " + "; ".join(done) + ". Non sono riuscito a completare il resto della richiesta nel tempo disponibile: dimmi se vuoi che continui.")
-    if last_error is not None:
-        return finish("Mi dispiace, in questo momento non riesco a contattare il modello o a completare l'operazione. Non ho modificato nulla nel CRM: riprova tra poco o riformula la richiesta.")
-    return finish("Non sono riuscito a completare la richiesta nel tempo disponibile e non ho modificato nulla nel CRM. Puoi riformularla in modo più specifico?")
+    return _fallback_reply(tctx, last_error, finish)

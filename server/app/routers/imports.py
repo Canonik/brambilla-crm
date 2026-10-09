@@ -26,9 +26,12 @@ async def create_import(request: Request):
         req = json.loads(raw if isinstance(raw, str) else await raw.read())
     except Exception:
         raise validation("importRequest must be JSON")
+    if not isinstance(req, dict) or not isinstance(req.get("files") or [], list) or not all(isinstance(f, dict) for f in req.get("files") or []):
+        raise validation("importRequest.files must be an array of objects")
     files = form.getlist("files")
     if not files:
         raise validation("files are required")
+    mapped: list[str] = []
     created, errors = 0, []
     with db.connection() as conn:
         s = Store(conn)
@@ -37,14 +40,19 @@ async def create_import(request: Request):
             text = data.decode("utf-8-sig", errors="replace")
             fmt = spec.get("fileFormat", "CSV")
             delimiter = "," if fmt == "CSV" else ";"
-            if ";" in text.splitlines()[0] and "," not in text.splitlines()[0]:
+            first_line = (text.splitlines() or [""])[0]
+            if ";" in first_line and "," not in first_line:
                 delimiter = ";"
             reader = csv.reader(io.StringIO(text), delimiter=delimiter)
             header = next(reader, [])
             mappings = (spec.get("fileImportPage") or {}).get("columnMappings") or []
+            if not isinstance(mappings, list) or not all(isinstance(m, dict) for m in mappings):
+                raise validation("columnMappings must be an array of objects")
             colmap = {}
             for m in mappings:
                 ot = defaults.resolve_type(m.get("columnObjectTypeId") or "0-1") or "contacts"
+                if defaults.type_id(ot) not in mapped:
+                    mapped.append(defaults.type_id(ot))
                 colmap[m.get("columnName")] = (ot, m.get("propertyName"), m.get("idColumnType"))
             for row in reader:
                 by_type: dict[str, dict] = {}
@@ -63,7 +71,7 @@ async def create_import(request: Request):
                     except ApiError as e:
                         errors.append({"message": e.message})
         iid = int(conn.execute("SELECT nextval('import_id_seq') AS id").fetchone()["id"])
-        d = {"id": str(iid), "state": "DONE", "createdAt": iso(utcnow()), "updatedAt": iso(utcnow()), "metadata": {"objectLists": [], "counters": {"CREATED": created, "ERRORS": len(errors)}, "fileIds": []}, "importRequestJson": req, "optOutImport": False}
+        d = {"id": str(iid), "state": "DONE", "createdAt": iso(utcnow()), "updatedAt": iso(utcnow()), "metadata": {"objectLists": [], "counters": {"CREATED": created, "ERRORS": len(errors)}, "fileIds": []}, "importRequestJson": req, "mappedObjectTypeIds": mapped, "optOutImport": False}
         conn.execute("INSERT INTO import_tasks (id, definition) VALUES (%s, %s)", (iid, Jsonb(d)))
         conn.commit()
     return d

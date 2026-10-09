@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, Response
 
 from .. import db
 from ..errors import not_found, validation
-from ..pipelines import _new_id, _norm_meta, create_pipeline, delete_pipeline, get_pipeline, save_pipeline
+from ..pipelines import _int, _new_id, _norm_meta, create_pipeline, delete_pipeline, get_pipeline, save_pipeline
 from ..store import Store
 from ..util import iso
 from .common import json_body, object_type_or_404
@@ -62,6 +62,8 @@ async def replace_pipeline(object_type: str, pipeline_id: str, request: Request)
         pl = get_pipeline(s, ot, pipeline_id)
         if not body.get("label") or not body.get("stages"):
             raise validation("label and stages are required")
+        if not isinstance(body["stages"], list) or not all(isinstance(st, dict) and st.get("label") for st in body["stages"]):
+            raise validation("each stage requires a label")
         now = iso(s.now)
         existing = {st["id"]: st for st in pl["stages"]}
         new_stages = []
@@ -69,12 +71,12 @@ async def replace_pipeline(object_type: str, pipeline_id: str, request: Request)
             sid = str(st.get("id") or "")
             if sid in existing:
                 d = dict(existing[sid])
-                d.update({"label": st.get("label", d["label"]), "displayOrder": int(st.get("displayOrder", i)), "metadata": _norm_meta(st.get("metadata", d.get("metadata"))), "updatedAt": now})
+                d.update({"label": st.get("label", d["label"]), "displayOrder": _int(st.get("displayOrder"), "displayOrder", i), "metadata": _norm_meta(st.get("metadata", d.get("metadata"))), "updatedAt": now})
             else:
-                d = {"id": sid or _new_id(conn), "label": str(st["label"]), "displayOrder": int(st.get("displayOrder", i)), "metadata": _norm_meta(st.get("metadata")), "createdAt": now, "updatedAt": now, "archived": False, "writePermissions": "CRM_PERMISSIONS_ENFORCEMENT"}
+                d = {"id": sid or _new_id(conn), "label": str(st["label"]), "displayOrder": _int(st.get("displayOrder"), "displayOrder", i), "metadata": _norm_meta(st.get("metadata")), "createdAt": now, "updatedAt": now, "archived": False, "writePermissions": "CRM_PERMISSIONS_ENFORCEMENT"}
             new_stages.append(d)
         pl["label"] = body["label"]
-        pl["displayOrder"] = int(body.get("displayOrder", pl.get("displayOrder", 0)))
+        pl["displayOrder"] = _int(body.get("displayOrder"), "displayOrder", pl.get("displayOrder", 0))
         pl["stages"] = new_stages
         save_pipeline(s, ot, pl)
         conn.commit()
@@ -110,7 +112,7 @@ async def create_stage(object_type: str, pipeline_id: str, request: Request):
         s = Store(conn)
         pl = get_pipeline(s, ot, pipeline_id)
         now = iso(s.now)
-        st = {"id": _new_id(conn), "label": str(body["label"]), "displayOrder": int(body.get("displayOrder", len(pl["stages"]))), "metadata": _norm_meta(body.get("metadata")), "createdAt": now, "updatedAt": now, "archived": False, "writePermissions": "CRM_PERMISSIONS_ENFORCEMENT"}
+        st = {"id": _new_id(conn), "label": str(body["label"]), "displayOrder": _int(body.get("displayOrder"), "displayOrder", len(pl["stages"])), "metadata": _norm_meta(body.get("metadata")), "createdAt": now, "updatedAt": now, "archived": False, "writePermissions": "CRM_PERMISSIONS_ENFORCEMENT"}
         pl["stages"].append(st)
         save_pipeline(s, ot, pl)
         conn.commit()

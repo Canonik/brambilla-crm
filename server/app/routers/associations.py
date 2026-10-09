@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response
 
 from .. import db, defaults
-from ..errors import not_found, validation
+from ..errors import ApiError, not_found, validation
 from ..store import Store
-from ..util import iso, utcnow
-from .common import int_limit, json_body, object_type_or_404
+from ..util import iso, parse_record_id, utcnow
+from .common import _ANY, batch_inputs, int_limit, json_body, object_type_or_404, ref_id
 
 router = APIRouter()
 
@@ -56,7 +56,7 @@ def put_default_association(object_type: str, object_id: str, to_type: str, to_i
 async def put_association(object_type: str, object_id: str, to_type: str, to_id: str, request: Request):
     ot = object_type_or_404(object_type)
     tt = object_type_or_404(to_type)
-    body = await json_body(request)
+    body = await json_body(request, expect=_ANY)
     if isinstance(body, dict):
         body = [body] if body else []
     if not isinstance(body, list):
@@ -65,7 +65,10 @@ async def put_association(object_type: str, object_id: str, to_type: str, to_id:
     for spec in body:
         if not isinstance(spec, dict) or spec.get("associationTypeId") is None:
             raise validation("each association spec requires associationCategory and associationTypeId")
-        type_ids.append(int(spec["associationTypeId"]))
+        tid = parse_record_id(spec["associationTypeId"])
+        if tid is None:
+            raise validation(f"Invalid associationTypeId: {spec['associationTypeId']!r}")
+        type_ids.append(tid)
     with db.connection() as conn:
         s = Store(conn)
         fid = s.resolve_id(ot, object_id, None)
@@ -81,9 +84,25 @@ def delete_association(object_type: str, object_id: str, to_type: str, to_id: st
     tt = object_type_or_404(to_type)
     with db.connection() as conn:
         s = Store(conn)
-        s.dissociate(ot, int(object_id), tt, int(to_id), None)
+        s.dissociate(ot, s.resolve_id(ot, object_id, None), tt, s.resolve_id(tt, to_id, None), None)
         conn.commit()
     return Response(status_code=204)
+
+
+def _type_ids(types) -> list[int]:
+    if types is None:
+        return []
+    if not isinstance(types, list) or not all(isinstance(t, dict) for t in types):
+        raise validation("types must be an array of objects")
+    out = []
+    for t in types:
+        if t.get("associationTypeId") is None:
+            continue
+        tid = parse_record_id(t["associationTypeId"])
+        if tid is None:
+            raise validation(f"Invalid associationTypeId: {t['associationTypeId']!r}")
+        out.append(tid)
+    return out
 
 
 # ------------------------------------------------------------------ batch
@@ -96,16 +115,16 @@ async def batch_create(from_type: str, to_type: str, request: Request):
     results, errors = [], []
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
+        for inp in batch_inputs(body):
             try:
-                fid = int((inp.get("from") or {}).get("id"))
-                tid = int((inp.get("to") or {}).get("id"))
-                tids = [int(t["associationTypeId"]) for t in (inp.get("types") or []) if t.get("associationTypeId") is not None]
+                fid = ref_id(inp.get("from"), "from id")
+                tid = ref_id(inp.get("to"), "to id")
+                tids = _type_ids(inp.get("types"))
                 with conn.transaction():
                     labels = s.associate(ft, fid, tt, tid, tids or None)
                 results.append(_assoc_result(ft, fid, tt, tid, labels))
-            except Exception as e:
-                errors.append({"status": "error", "category": getattr(e, "category", "VALIDATION_ERROR"), "message": getattr(e, "message", str(e)), "context": {}})
+            except ApiError as e:
+                errors.append({"status": "error", "category": e.category, "message": e.message, "context": {}})
         conn.commit()
     body_out = {"status": "COMPLETE", "results": results, "startedAt": started, "completedAt": iso(utcnow())}
     if errors:
@@ -124,9 +143,9 @@ async def batch_create_default(from_type: str, to_type: str, request: Request):
     results = []
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
-            fid = int((inp.get("from") or {}).get("id"))
-            tid = int((inp.get("to") or {}).get("id"))
+        for inp in batch_inputs(body):
+            fid = ref_id(inp.get("from"), "from id")
+            tid = ref_id(inp.get("to"), "to id")
             labels = s.associate(ft, fid, tt, tid, None)
             results.append(_assoc_result(ft, fid, tt, tid, labels))
         conn.commit()
@@ -142,8 +161,8 @@ async def batch_read(from_type: str, to_type: str, request: Request):
     results = []
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
-            fid = int(inp.get("id"))
+        for inp in batch_inputs(body):
+            fid = ref_id(inp, "id")
             rows, _ = s.associations_v4(ft, fid, tt, 500, None)
             if rows:
                 results.append({"from": {"id": str(fid)}, "to": rows})
@@ -158,10 +177,13 @@ async def batch_archive(from_type: str, to_type: str, request: Request):
     body = await json_body(request)
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
-            fid = int((inp.get("from") or {}).get("id"))
-            for to in inp.get("to") or []:
-                s.dissociate(ft, fid, tt, int(to.get("id")), None)
+        for inp in batch_inputs(body):
+            fid = ref_id(inp.get("from"), "from id")
+            tos = inp.get("to") or []
+            if not isinstance(tos, list):
+                raise validation("to must be an array")
+            for to in tos:
+                s.dissociate(ft, fid, tt, ref_id(to, "to id"), None)
         conn.commit()
     return Response(status_code=204)
 
@@ -173,10 +195,10 @@ async def batch_labels_archive(from_type: str, to_type: str, request: Request):
     body = await json_body(request)
     with db.connection() as conn:
         s = Store(conn)
-        for inp in body.get("inputs") or []:
-            fid = int((inp.get("from") or {}).get("id"))
-            tid = int((inp.get("to") or {}).get("id"))
-            tids = [int(t["associationTypeId"]) for t in (inp.get("types") or [])]
+        for inp in batch_inputs(body):
+            fid = ref_id(inp.get("from"), "from id")
+            tid = ref_id(inp.get("to"), "to id")
+            tids = _type_ids(inp.get("types"))
             s.dissociate(ft, fid, tt, tid, tids)
         conn.commit()
     return Response(status_code=204)
@@ -202,10 +224,14 @@ async def create_label(from_type: str, to_type: str, request: Request):
     tt = object_type_or_404(to_type)
     body = await json_body(request)
     label = body.get("label")
-    if not label:
+    if not label or not isinstance(label, str):
         raise validation("label is required")
     name = body.get("name") or label.lower().replace(" ", "_")
     inverse = body.get("inverseLabel")
+    if inverse is not None and not isinstance(inverse, str):
+        raise validation("inverseLabel must be a string")
+    if body.get("name") is not None and not isinstance(body.get("name"), str):
+        raise validation("name must be a string")
     with db.connection() as conn:
         mx = conn.execute("SELECT COALESCE(MAX(type_id), 1000) AS m FROM association_labels").fetchone()["m"]
         tid = max(int(mx) + 1, 1001)
@@ -224,7 +250,7 @@ async def create_label(from_type: str, to_type: str, request: Request):
 @router.put("/crm/v4/associations/{from_type}/{to_type}/labels")
 async def update_label(from_type: str, to_type: str, request: Request):
     body = await json_body(request)
-    tid = body.get("associationTypeId")
+    tid = parse_record_id(body.get("associationTypeId"))
     if tid is None:
         raise validation("associationTypeId required")
     with db.connection() as conn:

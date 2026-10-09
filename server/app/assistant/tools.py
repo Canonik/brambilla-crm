@@ -7,9 +7,11 @@ import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from .. import db, defaults
+from ..migration import parse as P
 from ..errors import ApiError
 from ..store import Store
-from ..util import iso, parse_datetime
+from ..util import fmt_money, iso, parse_datetime
+from . import attachments as A
 from .evidence import EvidenceTrace
 
 FX = {"EUR": Decimal("1"), "USD": Decimal("0.92"), "GBP": Decimal("1.17")}
@@ -30,6 +32,8 @@ class ToolContext:
         self.writes: list[str] = []
         self._stage_labels: dict[str, str] | None = None
         self._pipeline_labels: dict[str, str] | None = None
+        self._users_cache: P.Users | None = None
+        self.attachments: list[dict] = []  # CSV attachments of the conversation, see agent.collect_attachments
 
     # ---------------------------------------------------------- helpers
     def _labels(self, store: Store):
@@ -110,8 +114,10 @@ class ToolContext:
         return res
 
     # ---------------------------------------------------------- read tools
-    def search_companies(self, store: Store, name=None, domain=None, partita_iva=None, city=None, classe_cliente=None, query=None, limit=10):
+    def search_companies(self, store: Store, name=None, domain=None, partita_iva=None, city=None, classe_cliente=None, query=None, limit=10, id_legacy=None):
         filters = []
+        if id_legacy:
+            filters.append({"propertyName": "id_legacy", "operator": "EQ", "value": str(id_legacy).strip()})
         if domain:
             filters.append({"propertyName": "domain", "operator": "EQ", "value": domain.strip().lower()})
         if partita_iva:
@@ -133,11 +139,19 @@ class ToolContext:
                 if core and core.lower() != name.strip().lower():
                     res = self._search(store, "companies", filters, core, limit)
                     results = [self._company_brief(store, r) for r in res["results"]]
+        total = res["total"]
+        if name and not results:
+            # every word of the name, in any order, accents and legal suffixes ignored
+            rows = self._tokens_search(store, "companies", name, filters)
+            results = [self._company_brief(store, r) for r in rows]
+            total = len(results)
         # record cards must not be mistaken for instructions
-        return {"total": res["total"], "results": results}
+        return {"total": total, "results": results}
 
-    def search_contacts(self, store: Store, name=None, email=None, company_id=None, query=None, limit=10):
+    def search_contacts(self, store: Store, name=None, email=None, company_id=None, query=None, limit=10, id_legacy=None):
         filters = []
+        if id_legacy:
+            filters.append({"propertyName": "id_legacy", "operator": "EQ", "value": str(id_legacy).strip()})
         if email:
             filters.append({"propertyName": "email", "operator": "EQ", "value": email.strip().lower()})
         if company_id:
@@ -160,8 +174,232 @@ class ToolContext:
                     ids = set(store.associated_ids(int(company_id), "contacts"))
                     rows = [r for r in rows if r["id"] in ids]
                 results = [self._contact_brief(store, r) for r in rows]
+                if results:
+                    return {"total": len(results), "results": results}
+            rows = self._tokens_search(store, "contacts", name, filters)
+            results = [self._contact_brief(store, r) for r in rows]
+            if results:
                 return {"total": len(results), "results": results}
         return {"total": res["total"], "results": results}
+
+    _LEGAL_SUFFIX = re.compile(r"\b(s\.?p\.?a\.?|s\.?r\.?l\.?s?\.?|s\.?a\.?s\.?|s\.?n\.?c\.?|s\.?s\.?|srl|spa|sas|snc|srls|societa|ditta)\b", re.I)
+    _ACCENTS = ("àáâäãåèéêëìíîïòóôöõùúûüçñ", "aaaaaaeeeeiiiiooooouuuucn")
+
+    @classmethod
+    def _tokens(cls, name: str) -> list[str]:
+        s = (name or "").lower().translate(str.maketrans(*cls._ACCENTS))
+        s = cls._LEGAL_SUFFIX.sub(" ", s)
+        return [t for t in re.split(r"[^a-z0-9]+", s) if len(t) >= 2]
+
+    def _tokens_search(self, store: Store, object_type: str, name: str, filters: list | None = None) -> list:
+        """Rows whose name contains every word of `name` (any order, accents and legal suffixes ignored)."""
+        toks = self._tokens(name)
+        if not toks:
+            return []
+        expr = {"companies": "properties->>'name'", "contacts": "concat_ws(' ', properties->>'firstname', properties->>'lastname')"}[object_type]
+        norm = f"translate(lower({expr}), '{self._ACCENTS[0]}', '{self._ACCENTS[1]}')"
+        params: list = [object_type, [f"%{t}%" for t in toks]]
+        extra = ""
+        for f in filters or []:
+            if f.get("operator") == "EQ" and f.get("propertyName", "").startswith("associations.") is False:
+                extra += f" AND lower(properties->>%s) = lower(%s)"
+                params.extend([f["propertyName"], str(f["value"])])
+            elif f.get("propertyName") == "associations.company":
+                extra += " AND id IN (SELECT from_id FROM associations WHERE to_type = 'companies' AND to_id = ANY(%s::bigint[]))"
+                params.append([int(x) for x in f.get("values") or []])
+        params.append(MAX_LIST)
+        return store.conn.execute(
+            f"SELECT * FROM objects WHERE object_type = %s AND NOT archived AND {norm} LIKE ALL(%s::text[]){extra} ORDER BY length({expr}), id LIMIT %s",
+            params,
+        ).fetchall()
+
+    # ---------------------------------------------------------- users (R3), legacy ids, products
+    def _users(self, store: Store) -> P.Users:
+        if self._users_cache is None:
+            self._users_cache = A.load_users(store.conn)
+        return self._users_cache
+
+    def _resolve_user(self, store: Store, value) -> tuple[str | None, str | None]:
+        """(email, error) for a follower of a deal or ticket: name, Sinergia id or email of utenti.csv. Ex employees are an error (R3)."""
+        v = str(value or "").strip()
+        if not v:
+            return None, None
+        u = self._users(store).resolve(v)
+        if u is None:
+            return None, f"'{v}' non è un utente Brambilla (utenti.csv): usa list_users per trovare la persona giusta. Nessuna modifica fatta."
+        if not u["active"]:
+            return None, f"{u['firstname']} {u['lastname']} <{u['email']}> non lavora più in Brambilla: le trattative e i ticket li seguono solo utenti attivi (R3). Nessuna modifica fatta."
+        return u["email"], None
+
+    def _user_filter(self, store: Store, value) -> str | None:
+        """For searches: a colleague's name becomes the email, anything else passes through."""
+        v = str(value or "").strip()
+        if not v:
+            return None
+        u = self._users(store).resolve(v)
+        return u["email"] if u else v.lower()
+
+    def _prepare_props(self, store: Store, ot: str, props: dict, associations: list | None) -> dict | None:
+        """Before a write: followers must be active users (R3), authors are normalised to emails, line items remember their product."""
+        key = {"deals": "commerciale", "tickets": "assegnatario"}.get(ot)
+        if key and props.get(key):
+            email, err = self._resolve_user(store, props[key])
+            if err:
+                return {"error": err, "status": 400}
+            props[key] = email
+        if ot in defaults.ACTIVITY_TYPES and props.get("autore"):
+            u = self._users(store).resolve(str(props["autore"]))
+            if u:
+                props["autore"] = u["email"]
+        if ot == "line_items":
+            for a in associations or []:
+                if isinstance(a, dict) and defaults.resolve_type(str(a.get("object_type") or a.get("type") or "")) == "products" and a.get("id") is not None:
+                    props.setdefault("hs_product_id", str(a["id"]))
+        return None
+
+    def _after_line_item(self, store: Store, line_id: int) -> list[str]:
+        """R3: a deal with quote lines is worth the total of its lines (HubSpot does the same)."""
+        notes = []
+        for r in store.conn.execute("SELECT DISTINCT to_id FROM associations WHERE from_id = %s AND to_type = 'deals'", (line_id,)).fetchall():
+            tot = store.conn.execute(
+                "SELECT sum(NULLIF(o.properties->>'amount', '')::numeric) AS s, count(*) AS n FROM associations a JOIN objects o ON o.id = a.to_id AND o.object_type = 'line_items' AND NOT o.archived WHERE a.from_id = %s AND a.to_type = 'line_items'",
+                (r["to_id"],),
+            ).fetchone()
+            if tot["n"]:
+                amount = fmt_money(tot["s"] or 0)
+                store.update("deals", str(r["to_id"]), {"amount": amount})
+                notes.append(f"importo della trattativa {r['to_id']} aggiornato al totale delle righe: {amount}")
+        return notes
+
+    def find_by_legacy_id(self, store: Store, id_legacy: str, object_type: str | None = None):
+        lid = str(id_legacy or "").strip()
+        if not lid:
+            return {"error": "id_legacy mancante"}
+        if object_type:
+            ot = defaults.resolve_type(object_type)
+            if ot is None:
+                return {"error": f"tipo oggetto sconosciuto: {object_type}"}
+            types = [ot]
+        else:
+            types = ["companies", "contacts", "deals", "tickets", "line_items", "notes", "calls", "emails", "meetings"]
+        rows = store.conn.execute("SELECT * FROM objects WHERE object_type = ANY(%s::text[]) AND NOT archived AND properties->>'id_legacy' = %s ORDER BY id LIMIT %s", (types, lid, MAX_LIST)).fetchall()
+        return {"id_legacy": lid, "total": len(rows), "results": [self._any_brief(store, r) for r in rows]}
+
+    def _any_brief(self, store: Store, row) -> dict:
+        ot = row["object_type"]
+        if ot == "companies":
+            return {"object_type": ot, **self._company_brief(store, row)}
+        if ot == "contacts":
+            return {"object_type": ot, **self._contact_brief(store, row)}
+        if ot == "deals":
+            return {"object_type": ot, **self._deal_brief(store, row)}
+        if ot == "tickets":
+            return {"object_type": ot, **self._ticket_brief(store, row)}
+        if ot in defaults.ACTIVITY_TYPES:
+            return {"object_type": ot, **self._activity_brief(store, row)}
+        p = row["properties"]
+        return {"object_type": ot, "id": str(row["id"]), "name": p.get("name"), "hs_sku": p.get("hs_sku"), "price": p.get("price"), "quantity": p.get("quantity"), "amount": p.get("amount"), "id_legacy": p.get("id_legacy")}
+
+    def search_products(self, store: Store, sku=None, name=None, query=None, limit=10):
+        filters = []
+        if sku:
+            filters.append({"propertyName": "hs_sku", "operator": "EQ", "value": P.product_code(sku) or str(sku).strip()})
+        res = self._search(store, "products", filters, name or query, limit)
+        return {"total": res["total"], "results": [{"id": str(r["id"]), "hs_sku": r["properties"].get("hs_sku"), "name": r["properties"].get("name"), "price": r["properties"].get("price")} for r in res["results"]]}
+
+    # ---------------------------------------------------------- CSV attachments (Sinergia format)
+    def _attachment(self, name=None) -> tuple[dict | None, dict | None]:
+        atts = self.attachments or []
+        if not atts:
+            return None, {"error": "nessun allegato in questa conversazione"}
+        n = str(name or "").strip().lower()
+        if not n:
+            return atts[-1], None
+        for a in atts:
+            if (a.get("name") or "").strip().lower() == n:
+                return a, None
+        if n.isdigit() and 1 <= int(n) <= len(atts):
+            return atts[int(n) - 1], None
+        return None, {"error": f"allegato '{name}' non trovato; allegati disponibili: " + ", ".join(a.get("name") or f"#{i + 1}" for i, a in enumerate(atts))}
+
+    def _attachment_plans(self, store: Store, name, object_type):
+        att, err = self._attachment(name)
+        if err:
+            return None, None, None, err
+        header, rows = A.read_csv(att.get("content") or "")
+        if not header:
+            return None, None, None, {"error": "allegato vuoto o non in formato CSV"}
+        kind = None
+        if object_type:
+            o = str(object_type).strip().lower()
+            kind = "activities" if o in ("activities", "attivita", "attività", "activity") else defaults.resolve_type(o)
+            if kind in defaults.ACTIVITY_TYPES:
+                kind = "activities"
+            if kind is None or kind not in A.COLUMNS:
+                return None, None, None, {"error": f"tipo oggetto sconosciuto: {object_type}"}
+        kind = kind or A.detect_kind(header)
+        if kind is None:
+            return None, None, None, {"error": "non riconosco il tipo di file dall'intestazione: indica object_type (contacts, companies, deals, tickets, products, line_items, activities)", "columns": header, "rows": len(rows)}
+        if kind == "users":
+            return None, None, None, {"error": "il file è un elenco di utenti Brambilla (utenti.csv): gli utenti non si importano dall'assistente", "columns": header, "rows": len(rows)}
+        return att, kind, A.plan_rows(store, kind, header, rows, writer_email=self.user_email), None
+
+    def preview_attachment(self, store: Store, name=None, object_type=None, limit=25):
+        att, kind, plans, err = self._attachment_plans(store, name, object_type)
+        if err:
+            return err
+        lim = min(max(int(limit or 25), 1), 50)
+        return {"attachment": att.get("name"), "object_type": kind, "object_label": A.KIND_LABEL[kind], "summary": A.summarize(plans), "rows": [p.out() for p in plans[:lim]], "truncated": len(plans) > lim}
+
+    def import_attachment(self, store: Store, name=None, object_type=None, update_existing=None, skip_lines=None):
+        att, kind, plans, err = self._attachment_plans(store, name, object_type)
+        if err:
+            return err
+        if update_existing is None:
+            update_existing = kind == "products"  # R4: same code, republished at a new price
+        try:
+            skip = {int(x) for x in (skip_lines or [])}
+        except (TypeError, ValueError):
+            return {"error": "skip_lines deve essere una lista di numeri di riga"}
+        created, updated, skipped, failed = [], [], [], []
+        for p in plans:
+            if p.line in skip:
+                skipped.append({"line": p.line, "reason": "esclusa su richiesta"})
+                continue
+            if p.skip:
+                skipped.append({"line": p.line, "reason": p.skip})
+                continue
+            props = {k: v for k, v in p.properties.items() if v is not None}
+            assoc = [{"object_type": a["object_type"], "id": a["id"]} for a in p.associations]
+            if p.existing:
+                ex = p.existing
+                if not update_existing:
+                    skipped.append({"line": p.line, "reason": f"esiste già: {ex['object_type']} {ex['id']} '{ex['label']}' (stesso {ex['match']})", "id": ex["id"]})
+                    continue
+                r = self.update_record(store, ex["object_type"], ex["id"], {k: v for k, v in props.items() if k != "id_legacy" and v != ""})
+                if r.get("ok"):
+                    for a in assoc:
+                        self.associate(store, ex["object_type"], ex["id"], a["object_type"], a["id"])
+                    updated.append({"line": p.line, "id": ex["id"], "object_type": ex["object_type"], "label": ex["label"]})
+                else:
+                    failed.append({"line": p.line, "error": r.get("error")})
+                continue
+            r = self.create_record(store, p.object_type, props, assoc)
+            if r.get("ok"):
+                created.append({"line": p.line, "id": r["id"], "object_type": p.object_type, "label": self._plan_label(p), "associations": [f"{a['object_type']} {a['id']} ({a['label']})" for a in p.associations], "automations": r.get("automations") or []})
+            else:
+                failed.append({"line": p.line, "label": self._plan_label(p), "error": r.get("error")})
+        return {
+            "attachment": att.get("name"), "object_type": kind, "object_label": A.KIND_LABEL[kind],
+            "summary": {"rows": len(plans), "created": len(created), "updated": len(updated), "skipped": len(skipped), "failed": len(failed)},
+            "created": created[:60], "updated": updated[:60], "skipped": skipped[:60], "failed": failed[:60],
+            "warnings": [{"line": p.line, "warnings": p.warnings} for p in plans if p.warnings][:40],
+        }
+
+    @staticmethod
+    def _plan_label(p) -> str:
+        pr = p.properties
+        return (pr.get("name") or pr.get("dealname") or pr.get("subject") or " ".join(x for x in (pr.get("firstname"), pr.get("lastname")) if x) or pr.get("email") or pr.get("hs_sku") or pr.get("hs_note_body") or pr.get("hs_call_body") or pr.get("hs_email_text") or pr.get("hs_meeting_body") or "")[:80]
 
     def _pipeline(self, store: Store, object_type: str, pipeline: str) -> dict | None:
         value = str(pipeline).strip()
@@ -169,8 +407,11 @@ class ToolContext:
             value = "default"
         return store.pipeline_by_label(object_type, value) or next((p for p in store.pipelines(object_type) if p["id"] == value), None)
 
-    def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15):
+    def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15, id_legacy=None):
         filters = []
+        commerciale = self._user_filter(store, commerciale)
+        if id_legacy:
+            filters.append({"propertyName": "id_legacy", "operator": "EQ", "value": str(id_legacy).strip()})
         if company_id:
             filters.append({"propertyName": "associations.company", "operator": "IN", "values": [str(company_id)]})
         if contact_id:
@@ -197,8 +438,11 @@ class ToolContext:
         res = self._search(store, "deals", filters, name or query, limit, sorts=[{"propertyName": "closedate", "direction": "DESCENDING"}])
         return {"total": res["total"], "results": [self._deal_brief(store, r) for r in res["results"]]}
 
-    def search_tickets(self, store: Store, subject=None, company_id=None, contact_id=None, stage=None, assegnatario=None, priority=None, open_only=None, query=None, limit=15):
+    def search_tickets(self, store: Store, subject=None, company_id=None, contact_id=None, stage=None, assegnatario=None, priority=None, open_only=None, query=None, limit=15, id_legacy=None):
         filters = []
+        assegnatario = self._user_filter(store, assegnatario)
+        if id_legacy:
+            filters.append({"propertyName": "id_legacy", "operator": "EQ", "value": str(id_legacy).strip()})
         if company_id:
             filters.append({"propertyName": "associations.company", "operator": "IN", "values": [str(company_id)]})
         if contact_id:
@@ -443,6 +687,7 @@ class ToolContext:
     def deal_stats(self, store: Store, company_id=None, commerciale=None, pipeline=None, stage=None, year=None, open_only=None):
         where = ["object_type = 'deals'", "NOT archived"]
         params: list = []
+        commerciale = self._user_filter(store, commerciale)
         if company_id:
             where.append("id IN (SELECT from_id FROM associations WHERE to_id = %s AND to_type = 'companies')")
             params.append(int(company_id))
@@ -483,7 +728,7 @@ class ToolContext:
         return {"count": count, "total_eur": str(total_eur.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)), "by_stage": {k: {"count": v["count"], "total_eur": str(v["total_eur"].quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))} for k, v in by_stage.items()}}
 
     def my_customers(self, store: Store, user_email: str | None = None, limit=25):
-        email = (user_email or self.user_email or "").strip().lower()
+        email = (self._user_filter(store, user_email) or self.user_email or "").strip().lower()
         if not email:
             return {"error": "utente non indicato"}
         rows = store.conn.execute(
@@ -547,7 +792,8 @@ class ToolContext:
         if ot == "tickets":
             props.setdefault("assegnatario", self.user_email)
             if not props.get("hs_pipeline"):
-                pl = store.pipeline_by_label("tickets", "Assistenza")
+                from .. import rules
+                pl = rules.ensure_ticket_pipeline(store)
                 if pl:
                     props["hs_pipeline"] = pl["id"]
                     props.setdefault("hs_pipeline_stage", pl["stages"][0]["id"])
@@ -558,6 +804,9 @@ class ToolContext:
         if ot in defaults.ACTIVITY_TYPES:
             props.setdefault("autore", self.user_email)
             props.setdefault("hs_timestamp", iso(self.now))
+        bad = self._prepare_props(store, ot, props, associations)
+        if bad:
+            return bad
         assoc_payload = []
         for a in associations or []:
             tt = defaults.resolve_type(str(a.get("object_type") or a.get("type") or ""))
@@ -573,7 +822,8 @@ class ToolContext:
         except ApiError as e:
             return {"error": e.message, "status": e.status}
         self.writes.append(f"create {ot} {rec['id']}")
-        return {"ok": True, "object_type": ot, "id": rec["id"], "properties": {k: v for k, v in rec["properties"].items() if k in props or k in ("dealstage", "pipeline", "hs_pipeline_stage", "closedate", "amount")}, "automations": self._automation_note(store, ot, int(rec["id"]))}
+        extra_notes = self._after_line_item(store, int(rec["id"])) if ot == "line_items" else []
+        return {"ok": True, "object_type": ot, "id": rec["id"], "properties": {k: v for k, v in rec["properties"].items() if k in props or k in ("dealstage", "pipeline", "hs_pipeline_stage", "closedate", "amount")}, "automations": self._automation_note(store, ot, int(rec["id"])) + extra_notes}
 
     def _automation_note(self, store: Store, ot: str, id_: int) -> list[str]:
         notes = []
@@ -609,6 +859,9 @@ class ToolContext:
             sid = self._stage_id(store, "tickets", props["hs_pipeline_stage"], None)
             if sid:
                 props["hs_pipeline_stage"] = sid
+        bad = self._prepare_props(store, ot, props, None)
+        if bad:
+            return bad
         try:
             with store.conn.transaction():
                 rec = store.update(ot, id, props)
@@ -704,7 +957,18 @@ TOOL_SCHEMAS = [
     _schema("dissociate", "Rimuove un'associazione tra due record.", {"from_type": S("tipo"), "from_id": S("id"), "to_type": S("tipo"), "to_id": S("id")}, ["from_type", "from_id", "to_type", "to_id"]),
     _schema("archive_record", "Archivia (elimina) un record.", {"object_type": S("tipo"), "id": S("id")}, ["object_type", "id"]),
     _schema("create_records_bulk", "Crea più record dello stesso tipo in un colpo (es. contatti da un CSV allegato). Ogni elemento: {properties: {...}, associations: [...]}.", {"object_type": S("tipo"), "records": {"type": "array", "items": {"type": "object"}, "description": "elenco record"}}, ["object_type", "records"]),
+    _schema("find_by_legacy_id", "Trova un record dal suo codice Sinergia (id_legacy: es. 'ticket 595833', 'azienda 264566', 'trattativa 28595675'). Cerca in tutti i tipi se object_type manca.", {"id_legacy": S("codice Sinergia"), "object_type": S("companies, contacts, deals, tickets, line_items, notes, calls, emails, meetings (opzionale)")}, ["id_legacy"]),
+    _schema("search_products", "Cerca articoli del listino per codice (hs_sku, es. BF-12288 o 12288) o descrizione. Restituisce id, codice, descrizione e prezzo in euro.", {"sku": S("codice articolo"), "name": S("descrizione o parte"), "limit": I("max risultati")}),
+    _schema("preview_attachment", "Legge un CSV allegato (formato Sinergia, separatore ';') SENZA scrivere: riconosce il tipo (contatti, aziende, trattative, ticket, listino, righe d'offerta, attività), mappa ogni riga nelle proprietà del CRM, risolve id_azienda/id_contatto/id_opportunita/codice_articolo/id_utente nei record del CRM e segnala le righe che esistono già. Usalo per rispondere a domande sull'allegato o per controllare prima di importare.", {"name": S("nome dell'allegato (default: l'ultimo)"), "object_type": S("tipo, solo se l'intestazione non basta"), "limit": I("righe mostrate (default 25)")}),
+    _schema("import_attachment", "Importa nel CRM le righe di un CSV allegato (stessa logica di preview_attachment), creando i record con le associazioni risolte. Le righe già esistenti (stessa email, partita IVA, codice Sinergia o codice articolo) non vengono duplicate: saltate, oppure aggiornate con update_existing=true (default true solo per il listino, R4). Usalo solo quando l'utente chiede di importare/aggiungere i dati dell'allegato. Risponde con creati, aggiornati, saltati e falliti riga per riga.", {"name": S("nome dell'allegato (default: l'ultimo)"), "object_type": S("tipo, solo se l'intestazione non basta"), "update_existing": B("aggiorna i record già esistenti invece di saltarli"), "skip_lines": {"type": "array", "items": {"type": "integer"}, "description": "numeri di riga da non importare"}}),
 ]
+for _s in TOOL_SCHEMAS:
+    if _s["function"]["name"] in ("search_companies", "search_contacts", "search_deals", "search_tickets"):
+        _s["function"]["parameters"]["properties"]["id_legacy"] = S("codice Sinergia del record (id_legacy)")
+    if _s["function"]["name"] == "search_deals":
+        _s["function"]["parameters"]["properties"]["commerciale"] = S("email o nome del commerciale")
+    if _s["function"]["name"] == "search_tickets":
+        _s["function"]["parameters"]["properties"]["assegnatario"] = S("email o nome dell'assegnatario")
 
 
 def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | None = None) -> dict:

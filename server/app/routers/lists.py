@@ -6,8 +6,8 @@ from psycopg.types.json import Jsonb
 from .. import db, defaults
 from ..errors import not_found, validation
 from ..store import Store
-from ..util import iso, utcnow
-from .common import int_limit, json_body
+from ..util import iso, parse_record_id, utcnow
+from .common import _ANY, int_field, int_limit, json_body
 
 router = APIRouter(prefix="/crm/v3/lists")
 
@@ -38,9 +38,8 @@ def create_list(conn, name: str, object_type_id: str, processing_type: str = "MA
 
 
 def _get(conn, list_id: str) -> dict:
-    try:
-        lid = int(list_id)
-    except ValueError:
+    lid = parse_record_id(list_id)
+    if lid is None:
         raise not_found(f"List {list_id} not found")
     row = conn.execute("SELECT definition FROM lists WHERE list_id = %s", (lid,)).fetchone()
     if not row:
@@ -53,7 +52,7 @@ def _get(conn, list_id: str) -> dict:
 async def create_list_ep(request: Request):
     body = await json_body(request)
     name = body.get("name")
-    if not name:
+    if not name or not isinstance(name, str):
         raise validation("name is required")
     ot = body.get("objectTypeId") or "0-1"
     with db.connection() as conn:
@@ -66,10 +65,14 @@ async def create_list_ep(request: Request):
 @router.post("/search")
 async def search_lists(request: Request):
     body = await json_body(request)
-    q = (body.get("query") or "").strip().lower()
+    q = str(body.get("query") or "").strip().lower()
     types = body.get("processingTypes") or []
-    offset = int(body.get("offset") or 0)
-    count = int(body.get("count") or 20)
+    if not isinstance(types, list):
+        raise validation("processingTypes must be an array")
+    offset = int_field(body.get("offset"), "offset", 0)
+    count = int_field(body.get("count"), "count", 20)
+    if offset < 0 or count < 0:
+        raise validation("offset and count must not be negative")
     with db.connection() as conn:
         rows = conn.execute("SELECT definition FROM lists ORDER BY list_id").fetchall()
         items = [r["definition"] for r in rows]
@@ -100,7 +103,7 @@ def get_list_by_name(object_type_id: str, list_name: str):
 def get_lists_by_ids(listIds: list[str] | None = None, includeFilters: str | None = None):
     with db.connection() as conn:
         if listIds:
-            rows = conn.execute("SELECT definition FROM lists WHERE list_id = ANY(%s) ORDER BY list_id", ([int(x) for x in listIds if x.isdigit()],)).fetchall()
+            rows = conn.execute("SELECT definition FROM lists WHERE list_id = ANY(%s) ORDER BY list_id", ([i for i in (parse_record_id(x) for x in listIds) if i is not None],)).fetchall()
         else:
             rows = conn.execute("SELECT definition FROM lists ORDER BY list_id").fetchall()
         return {"lists": [_list_out(conn, r["definition"]) for r in rows]}
@@ -165,8 +168,11 @@ def list_memberships(list_id: str, request: Request, limit: str | None = None, a
         params: list = [lid]
         sql = "SELECT record_id, added_at FROM list_memberships WHERE list_id = %s"
         if after:
+            cursor = parse_record_id(after)
+            if cursor is None:
+                raise validation(f"Invalid paging cursor: {after}")
             sql += " AND record_id > %s"
-            params.append(int(after))
+            params.append(cursor)
         sql += " ORDER BY record_id LIMIT %s"
         params.append(lim + 1)
         rows = conn.execute(sql, params).fetchall()
@@ -191,10 +197,10 @@ def _ids(body) -> list[int]:
         raise validation("body must be a list of record ids")
     out = []
     for x in body:
-        try:
-            out.append(int(x))
-        except (TypeError, ValueError):
+        rid = parse_record_id(x)
+        if rid is None:
             raise validation(f"invalid record id {x!r}")
+        out.append(rid)
     return out
 
 
@@ -213,18 +219,18 @@ def add_members(conn, lid: int, ot: str, ids: list[int]) -> tuple[list[str], lis
 
 @router.put("/{list_id}/memberships/add")
 async def add_memberships(list_id: str, request: Request):
-    ids = _ids(await json_body(request))
+    ids = _ids(await json_body(request, expect=_ANY))
     with db.connection() as conn:
         d = _get(conn, list_id)
         ot = defaults.resolve_type(d["objectTypeId"])
         added, missing = add_members(conn, int(d["listId"]), ot, ids)
         conn.commit()
-    return {"recordIdsAdded": added, "recordIdsRemoved": [], "recordIdsMissing": missing}
+    return {"recordsIdsAdded": added, "recordIdsAdded": added, "recordIdsRemoved": [], "recordIdsMissing": missing}
 
 
 @router.put("/{list_id}/memberships/remove")
 async def remove_memberships(list_id: str, request: Request):
-    ids = _ids(await json_body(request))
+    ids = _ids(await json_body(request, expect=_ANY))
     with db.connection() as conn:
         d = _get(conn, list_id)
         removed = []
@@ -233,7 +239,7 @@ async def remove_memberships(list_id: str, request: Request):
             if r:
                 removed.append(str(rid))
         conn.commit()
-    return {"recordIdsAdded": [], "recordIdsRemoved": removed, "recordIdsMissing": []}
+    return {"recordsIdsAdded": [], "recordIdsAdded": [], "recordIdsRemoved": removed, "recordIdsMissing": []}
 
 
 @router.put("/{list_id}/memberships/add-and-remove")
@@ -249,7 +255,7 @@ async def add_remove_memberships(list_id: str, request: Request):
             if r:
                 removed.append(str(rid))
         conn.commit()
-    return {"recordIdsAdded": added, "recordIdsRemoved": removed, "recordIdsMissing": missing}
+    return {"recordsIdsAdded": added, "recordIdsAdded": added, "recordIdsRemoved": removed, "recordIdsMissing": missing}
 
 
 @router.delete("/{list_id}/memberships", status_code=204)

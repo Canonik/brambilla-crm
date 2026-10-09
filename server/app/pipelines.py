@@ -18,7 +18,20 @@ def _new_id(conn) -> str:
             return cand
 
 
+def _int(value, name: str, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise validation(f"{name} must be an integer")
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        raise validation(f"{name} must be an integer")
+
+
 def _norm_meta(meta: dict | None) -> dict:
+    if meta is not None and not isinstance(meta, dict):
+        raise validation("metadata must be an object")
     out = {}
     for k, v in (meta or {}).items():
         if isinstance(v, bool):
@@ -36,7 +49,7 @@ def _stage_obj(conn, s: dict, i: int, now: str, existing_ids: set[str]) -> dict:
         sid = _new_id(conn)
     existing_ids.add(sid)
     return {
-        "id": sid, "label": str(s["label"]), "displayOrder": int(s.get("displayOrder", i)),
+        "id": sid, "label": str(s["label"]), "displayOrder": _int(s.get("displayOrder"), "displayOrder", i),
         "metadata": _norm_meta(s.get("metadata")), "createdAt": now, "updatedAt": now, "archived": False,
         "writePermissions": "CRM_PERMISSIONS_ENFORCEMENT",
     }
@@ -46,13 +59,15 @@ def create_pipeline(store, object_type: str, body: dict) -> dict:
     if not isinstance(body, dict) or not body.get("label"):
         raise validation("pipeline requires a label")
     stages = body.get("stages") or []
+    if not isinstance(stages, list):
+        raise validation("stages must be an array")
     if not stages:
         raise validation("pipeline requires at least one stage")
     now = iso(store.now)
     pid = str(body.get("id") or _new_id(store.conn))
     ids: set[str] = set()
     pl = {
-        "id": pid, "label": str(body["label"]), "displayOrder": int(body.get("displayOrder", 0)),
+        "id": pid, "label": str(body["label"]), "displayOrder": _int(body.get("displayOrder"), "displayOrder", 0),
         "stages": [_stage_obj(store.conn, s, i, now, ids) for i, s in enumerate(stages)],
         "createdAt": now, "updatedAt": now, "archived": False,
     }

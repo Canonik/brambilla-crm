@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from psycopg import sql
+
 from fastapi import APIRouter, Request, Response
 
 from .. import config, db, defaults
@@ -25,6 +27,9 @@ def reset_database() -> None:
         conn.execute("ALTER SEQUENCE lists_id_seq RESTART WITH 1")
         conn.execute("ALTER SEQUENCE export_id_seq RESTART WITH 1")
         conn.execute("ALTER SEQUENCE import_id_seq RESTART WITH 1")
+        # custom unique properties disappear with the reset, so do their indexes
+        for r in conn.execute("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname LIKE 'objects\\_uq\\_%'").fetchall():
+            conn.execute(sql.SQL("DROP INDEX IF EXISTS {}").format(sql.Identifier(r["indexname"])))
         defaults.ensure_defaults(conn, reset=True)
         conn.commit()
     invalidate_caches()
@@ -42,8 +47,10 @@ def reset():
 async def migrate(request: Request):
     body = await json_body(request)
     url = body.get("export_url") if isinstance(body, dict) else None
-    if not url:
+    if not url or not isinstance(url, str):
         raise validation("export_url is required")
+    if not url.lower().startswith(("http://", "https://")):
+        raise validation("export_url must be an http or https address")
     from ..migration.importer import run_migration
     from starlette.concurrency import run_in_threadpool
     try:

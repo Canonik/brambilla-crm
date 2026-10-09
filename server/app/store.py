@@ -12,7 +12,7 @@ from psycopg.types.json import Jsonb
 
 from . import defaults
 from .errors import ApiError, conflict, not_found, validation
-from .util import email_domain, fmt_money, iso, normalize_domain, normalize_number, parse_datetime, utcnow, valid_email
+from .util import email_domain, fmt_money, iso, normalize_domain, normalize_number, parse_datetime, parse_record_id, utcnow, valid_email
 
 _defs_cache: dict[str, dict[str, dict]] = {}
 _pipeline_cache: dict[str, list[dict]] = {}
@@ -45,6 +45,11 @@ def record_out(row, properties: list[str] | None, object_type: str, *, all_props
     if row.get("archived_at"):
         out["archivedAt"] = iso(row["archived_at"])
     return out
+
+
+def properties_written(props: dict) -> dict:
+    """On create the normalized properties are exactly what the request wrote."""
+    return props
 
 
 class Store:
@@ -294,6 +299,8 @@ class Store:
                 out["closed_date"] = iso(self.now)
 
     def _normalize_line_item(self, out: dict, existing: dict | None) -> None:
+        if existing is None and "quantity" not in out:
+            out["quantity"] = "1"
         merged = dict(existing or {})
         merged.update(out)
         q = merged.get("quantity")
@@ -346,10 +353,10 @@ class Store:
             if not row:
                 raise not_found(f"No {defaults.OBJECT_TYPES[object_type]['singular']} with {id_property} '{id_value}' exists")
             return int(row["id"])
-        try:
-            return int(str(id_value).strip())
-        except ValueError:
+        rid = parse_record_id(id_value)
+        if rid is None:
             raise not_found(f"resource not found: {id_value}")
+        return rid
 
     def get(self, object_type: str, id_value, properties: list[str] | None = None, associations: list[str] | None = None, id_property: str | None = None, *, include_archived: bool = False) -> dict:
         id_ = self.resolve_id(object_type, id_value, id_property)
@@ -365,6 +372,8 @@ class Store:
         return int(self.conn.execute("SELECT nextval('objects_id_seq') AS id").fetchone()["id"])
 
     def create(self, object_type: str, properties: dict, associations: list | None = None, *, run_rules: bool = True) -> dict:
+        if associations is not None and not isinstance(associations, list):
+            raise validation("associations must be an array")
         props = self.normalize_properties(object_type, properties or {})
         props = {k: v for k, v in props.items() if v is not None}
         ot = defaults.OBJECT_TYPES[object_type]
@@ -377,6 +386,9 @@ class Store:
             props["hs_ticket_id"] = str(id_)
         if object_type == "contacts":
             props["hs_full_name_or_email"] = (" ".join(x for x in (props.get("firstname"), props.get("lastname")) if x) or props.get("email") or "")
+        if object_type == "deals":
+            # before the insert: it stamps closedate and the closed-won/lost dates into props
+            self._deal_stage_dates(id_, None, props.get("dealstage"), props, written=properties_written(props))
         try:
             with self.conn.transaction():
                 self.conn.execute(
@@ -387,8 +399,6 @@ class Store:
             raise self._unique_conflict(object_type, props, e)
         if object_type == "companies":
             self._sync_company_domains(id_, props)
-        if object_type == "deals":
-            self._deal_stage_dates(id_, None, props.get("dealstage"), props)
         for a in associations or []:
             self._apply_association_payload(object_type, id_, a)
         if run_rules:
@@ -405,6 +415,8 @@ class Store:
         if "objects_company_piva_uq" in msg:
             ex = self.conn.execute("SELECT id FROM objects WHERE object_type='companies' AND NOT archived AND properties->>'partita_iva' = %s", (props.get("partita_iva"),)).fetchone()
             return conflict(f"Company with partita_iva {props.get('partita_iva')} already exists. Existing ID: {ex['id'] if ex else 'unknown'}")
+        if "objects_uq_" in msg:
+            return conflict("A record with the same value for a unique property already exists")
         return conflict("Record already exists")
 
     def update(self, object_type: str, id_value, properties: dict, id_property: str | None = None, *, run_rules: bool = True) -> dict:
@@ -426,7 +438,7 @@ class Store:
         if object_type == "contacts":
             new["hs_full_name_or_email"] = (" ".join(x for x in (new.get("firstname"), new.get("lastname")) if x) or new.get("email") or "")
         if object_type == "deals" and old.get("dealstage") != new.get("dealstage"):
-            self._deal_stage_dates(id_, old.get("dealstage"), new.get("dealstage"), new)
+            self._deal_stage_dates(id_, old.get("dealstage"), new.get("dealstage"), new, written=props)
         try:
             with self.conn.transaction():
                 self.conn.execute("UPDATE objects SET properties = %s, updated_at = %s WHERE id = %s", (Jsonb(new), now, id_))
@@ -440,7 +452,8 @@ class Store:
         row = self._row(object_type, id_)
         return record_out(row, None, object_type)
 
-    def _deal_stage_dates(self, id_: int, old_stage, new_stage, props: dict) -> None:
+    def _deal_stage_dates(self, id_: int, old_stage, new_stage, props: dict, written: dict | None = None) -> None:
+        """Closing dates. `props` is the full new state; `written` is what this request set."""
         look = self.stage_lookup("deals", new_stage) if new_stage else None
         if not look:
             return
@@ -449,7 +462,9 @@ class Store:
         if not closed:
             return
         won = float(meta.get("probability") or 0) >= 1.0
-        if not props.get("closedate"):
+        # entering a closed stage stamps the request clock unless this very write gave a close date
+        given = (written if written is not None else props).get("closedate")
+        if not given:
             props["closedate"] = iso(self.now)
         if won:
             props["hs_closed_won_date"] = iso(self.now)
@@ -556,17 +571,24 @@ class Store:
         if not isinstance(a, dict):
             raise validation("associations must be objects")
         to = a.get("to") or {}
-        to_id = to.get("id") if isinstance(to, dict) else to
-        if to_id is None:
+        raw_to = to.get("id") if isinstance(to, dict) else to
+        if raw_to is None:
             raise validation("association target id missing")
+        to_id = parse_record_id(raw_to)
+        if to_id is None:
+            raise validation(f"Invalid association target id: {raw_to!r}")
         types = a.get("types") or []
+        if not isinstance(types, list) or not all(isinstance(t, dict) for t in types):
+            raise validation("association types must be an array of objects")
         type_ids = []
         to_type = None
         for t in types:
             tid = t.get("associationTypeId")
             if tid is None:
                 continue
-            tid = int(tid)
+            tid = parse_record_id(tid)
+            if tid is None:
+                raise validation(f"Invalid associationTypeId: {t.get('associationTypeId')!r}")
             lab = self.assoc_label(tid)
             if lab is None:
                 raise validation(f"Association type {tid} does not exist")
@@ -576,12 +598,12 @@ class Store:
             to_type_name = defaults.resolve_type(str(to.get("objectType") or a.get("toObjectType") or ""))
             if to_type_name is None:
                 # infer from the target record
-                r = self.conn.execute("SELECT object_type FROM objects WHERE id = %s", (int(to_id),)).fetchone()
+                r = self.conn.execute("SELECT object_type FROM objects WHERE id = %s", (to_id,)).fetchone()
                 if r is None:
                     raise not_found(f"No object with ID {to_id} exists")
                 to_type_name = r["object_type"]
             to_type = to_type_name
-        self.associate(object_type, id_, to_type, int(to_id), type_ids or None)
+        self.associate(object_type, id_, to_type, to_id, type_ids or None)
 
     def assoc_label(self, type_id: int) -> dict | None:
         return self.conn.execute("SELECT * FROM association_labels WHERE type_id = %s", (type_id,)).fetchone()

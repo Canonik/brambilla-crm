@@ -1,4 +1,5 @@
 import logging
+import re
 import threading
 import time
 
@@ -78,6 +79,51 @@ async def auth_and_limits(request: Request, call_next):
     return resp
 
 
+# Date-versioned (2026-09) URL families share the legacy handlers. Objects and properties are
+# mounted twice below; the families whose routers carry their own prefix are rewritten here,
+# before authentication and routing, so both spellings behave identically.
+_V = config.API_VERSION
+_DATED_PREFIXES = [
+    (f"/crm/pipelines/{_V}", "/crm/v3/pipelines"),
+    (f"/crm/lists/{_V}", "/crm/v3/lists"),
+    (f"/crm/imports/{_V}", "/crm/v3/imports"),
+    (f"/crm/exports/{_V}", "/crm/v3/exports"),
+    (f"/crm/owners/{_V}", "/crm/v3/owners"),
+    (f"/crm/associations/{_V}", "/crm/v4/associations"),
+]
+_DATED_RECORD_ASSOC = re.compile(rf"^/crm/objects/{re.escape(_V)}/([^/]+)/([^/]+)/associations(/.*)?$")
+
+
+def dated_to_legacy(path: str) -> str:
+    for dated, legacy in _DATED_PREFIXES:
+        if path == dated or path.startswith(dated + "/"):
+            return legacy + path[len(dated):]
+    m = _DATED_RECORD_ASSOC.match(path)
+    if m:
+        # record associations in the dated API are the v4 ones (toObjectId + associationTypes)
+        return f"/crm/v4/objects/{m.group(1)}/{m.group(2)}/associations{m.group(3) or ''}"
+    return path
+
+
+class DatedPathRewrite:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope["path"]
+            new = dated_to_legacy(path)
+            if new != path:
+                scope = dict(scope)
+                scope["path"] = new
+                raw = scope.get("raw_path")
+                if raw is not None:
+                    # prefixes are ASCII: rewrite the encoded path the same way, keeping %-escapes
+                    scope["raw_path"] = dated_to_legacy(raw.decode("latin-1")).encode("latin-1")
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(DatedPathRewrite)
 app.add_exception_handler(ApiError, api_error_handler)
 
 

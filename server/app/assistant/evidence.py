@@ -17,7 +17,18 @@ from typing import Any
 
 MAX_EVENTS = 64
 MAX_RECORDS = 20
+MAX_RELATIONS = 40
 MAX_CALLS = 32
+MAX_COUNT = 1_000_000
+# Failure categories are a closed set derived from the numeric status a tool
+# reported, never from error text.
+FAILURES = {400: "validation", 404: "not_found", 409: "conflict", 429: "rate_limited"}
+FAILURE_KINDS = frozenset(("validation", "not_found", "conflict", "rate_limited", "rejected", "error"))
+LIST_TOOLS = frozenset(
+    ("search_companies", "search_contacts", "search_deals", "search_tickets",
+     "my_customers", "dormant_list", "list_activities", "list_users",
+     "find_by_legacy_id", "search_products", "list_deal_line_items")
+)
 RECORD_TYPES = frozenset(
     ("companies", "contacts", "deals", "tickets", "products", "line_items",
      "notes", "calls", "emails", "meetings", "tasks")
@@ -39,12 +50,17 @@ TOOLS: dict[str, tuple[str, str]] = {
     "list_users": ("read", "Retrieved active users"),
     "pipelines": ("read", "Retrieved pipelines"),
     "dormant_list": ("read", "Retrieved dormant customers"),
+    "find_by_legacy_id": ("read", "Looked up a Sinergia legacy id"),
+    "search_products": ("read", "Searched the price list"),
+    "list_deal_line_items": ("read", "Retrieved deal line items"),
+    "preview_attachment": ("read", "Previewed a CSV attachment"),
     "create_record": ("write", "Created a CRM record"),
     "update_record": ("write", "Updated a CRM record"),
     "associate": ("write", "Associated CRM records"),
     "dissociate": ("write", "Removed a CRM association"),
     "archive_record": ("write", "Archived a CRM record"),
     "create_records_bulk": ("write", "Created CRM records in bulk"),
+    "import_attachment": ("write", "Imported a CSV attachment"),
 }
 
 
@@ -86,10 +102,13 @@ def _safe_summary(tool: str, args: dict) -> str:
     return TOOLS.get(tool, ("read", "Observed CRM operation"))[1]
 
 
-def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], bool]:
-    """Extract identifiers only from documented result shapes and safe id args."""
+def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], list[dict[str, dict[str, str]]], bool]:
+    """Extract identifiers, and the links between them that the tool itself read,
+    only from documented result shapes and safe id args."""
     found: list[dict[str, str]] = []
+    relations: list[dict[str, dict[str, str]]] = []
     seen: set[tuple[str, str]] = set()
+    linked: set[tuple[str, str, str, str]] = set()
     incomplete = False
 
     def add(type_value: Any, id_value: Any) -> None:
@@ -106,8 +125,25 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
         seen.add(key)
         found.append({"type": ot, "id": id_})
 
+    def link(from_type: Any, from_id: Any, to_type: Any, to_id: Any) -> None:
+        """A relation is kept only when both ends were already accepted as records."""
+        nonlocal incomplete
+        ft, fid, tt, tid = _object_type(from_type), _canonical_id(from_id), _object_type(to_type), _canonical_id(to_id)
+        if not ft or not fid or not tt or not tid or (ft, fid) == (tt, tid):
+            return
+        if (ft, fid) not in seen or (tt, tid) not in seen:
+            return
+        key = (ft, fid, tt, tid)
+        if key in linked or (tt, tid, ft, fid) in linked:
+            return
+        if len(relations) >= MAX_RELATIONS:
+            incomplete = True
+            return
+        linked.add(key)
+        relations.append({"from": {"type": ft, "id": fid}, "to": {"type": tt, "id": tid}})
+
     if not isinstance(result, dict):
-        return found, incomplete
+        return found, relations, incomplete
 
     search_types = {
         "search_companies": "companies", "search_contacts": "contacts",
@@ -120,8 +156,16 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
             for row in values:
                 if isinstance(row, dict):
                     add(search_types[tool], row.get("id"))
+            # contact/deal/ticket briefs carry the company the store resolved
+            # through its stored associations: an observed link, not a guess.
+            if search_types[tool] != "companies":
+                for row in values:
+                    if isinstance(row, dict) and row.get("company_id") is not None:
+                        add("companies", row.get("company_id"))
+                        link(search_types[tool], row.get("id"), "companies", row.get("company_id"))
     elif tool == "get_record":
-        add(result.get("object_type") or args.get("object_type"), result.get("id"))
+        own_type, own_id = result.get("object_type") or args.get("object_type"), result.get("id")
+        add(own_type, own_id)
         assoc = result.get("associations")
         if isinstance(assoc, dict):
             for object_type, rows in assoc.items():
@@ -129,22 +173,58 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
                     for row in rows:
                         if isinstance(row, dict):
                             add(object_type, row.get("id"))
+                            link(own_type, own_id, object_type, row.get("id"))
     elif tool == "company_overview":
         company = result.get("company")
-        if isinstance(company, dict):
-            add("companies", company.get("id"))
+        company_id = company.get("id") if isinstance(company, dict) else None
+        add("companies", company_id)
         for key, ot in (("contacts", "contacts"), ("deals", "deals"), ("tickets", "tickets"), ("last_activities", None)):
             rows = result.get(key)
             if isinstance(rows, list):
                 for row in rows:
                     if isinstance(row, dict):
                         add(ot or row.get("type"), row.get("id"))
+                        link("companies", company_id, ot or row.get("type"), row.get("id"))
     elif tool == "list_activities":
         rows = result.get("results")
         if isinstance(rows, list):
             for row in rows:
                 if isinstance(row, dict):
                     add(row.get("type"), row.get("id"))
+    elif tool == "find_by_legacy_id":
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add(row.get("object_type"), row.get("id"))
+    elif tool == "search_products":
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add("products", row.get("id"))
+    elif tool == "list_deal_line_items":
+        deal_id = result.get("deal_id")
+        add("deals", deal_id)
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add("line_items", row.get("id"))
+                    link("deals", deal_id, "line_items", row.get("id"))
+                    product = row.get("product")
+                    if isinstance(product, dict):
+                        add("products", product.get("id"))
+                        link("line_items", row.get("id"), "products", product.get("id"))
+    elif tool == "import_attachment":
+        # Rows the import created or updated are the only records it vouches for;
+        # skipped and failed rows did not change the CRM.
+        for key in ("created", "updated"):
+            rows = result.get(key)
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict):
+                        add(row.get("object_type"), row.get("id"))
     elif tool == "revenue":
         add("companies", result.get("company_id"))
         rows = result.get("won_deals")
@@ -152,8 +232,18 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
             for row in rows:
                 if isinstance(row, dict):
                     add("deals", row.get("id"))
-    elif tool in ("create_record", "update_record"):
+                    link("companies", result.get("company_id"), "deals", row.get("id"))
+    elif tool == "update_record":
         add(result.get("object_type") or args.get("object_type"), result.get("id"))
+    elif tool == "create_record":
+        own_type, own_id = result.get("object_type") or args.get("object_type"), result.get("id")
+        add(own_type, own_id)
+        targets = args.get("associations")
+        if result.get("ok") is True and isinstance(targets, list):
+            for target in targets[:MAX_RECORDS]:
+                if isinstance(target, dict):
+                    add(target.get("object_type") or target.get("type"), target.get("id"))
+                    link(own_type, own_id, target.get("object_type") or target.get("type"), target.get("id"))
     elif tool == "create_records_bulk":
         rows = result.get("results")
         if isinstance(rows, list):
@@ -163,10 +253,26 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
     elif tool in ("associate", "dissociate") and result.get("ok") is True:
         add(args.get("from_type"), args.get("from_id"))
         add(args.get("to_type"), args.get("to_id"))
+        link(args.get("from_type"), args.get("from_id"), args.get("to_type"), args.get("to_id"))
     elif tool == "archive_record" and result.get("ok") is True:
         add(args.get("object_type"), args.get("id"))
 
-    return found, incomplete
+    return found, relations, incomplete
+
+
+def _bounded_count(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= MAX_COUNT else None
+
+
+def _counts(tool: str, result: Any) -> tuple[int | None, int | None]:
+    """Row counts for list-shaped reads: how many rows came back, and the store total when reported."""
+    if tool not in LIST_TOOLS or not isinstance(result, dict):
+        return None, None
+    rows = result.get("results")
+    count = min(len(rows), MAX_COUNT) if isinstance(rows, list) else None
+    return count, _bounded_count(result.get("total"))
 
 
 _MONEY = re.compile(r"-?(?:0|[1-9][0-9]{0,11})\.[0-9]{2}")
@@ -207,7 +313,11 @@ class _Call:
     returned: bool = False
     settled: bool = False
     records: list[dict[str, str]] | None = None
+    relations: list[dict[str, dict[str, str]]] | None = None
     calculation: dict | None = None
+    count: int | None = None
+    total: int | None = None
+    failure: str | None = None
 
 
 class EvidenceTrace:
@@ -231,8 +341,16 @@ class EvidenceTrace:
             event["durationMs"] = max(0, min(60_000, round((time.perf_counter() - call.started) * 1000)))
             event["inputSummary"] = _safe_summary(call.tool, call.args)
             event["records"] = list(call.records or [])
+            if call.relations:
+                event["relations"] = list(call.relations)
+            if call.count is not None:
+                event["count"] = call.count
+            if call.total is not None:
+                event["total"] = call.total
             if call.calculation is not None:
                 event["calculation"] = call.calculation
+            if call.failure is not None and status in ("failed", "rolled_back", "unknown"):
+                event["failure"] = call.failure
         self._events.append(event)
 
     def begin(self, tool: Any, args: Any) -> int | None:
@@ -260,10 +378,13 @@ class EvidenceTrace:
                 self._incomplete = True
                 return
             call.returned = True
-            call.records, omitted = _records(call.tool, call.args, result)
+            call.records, call.relations, omitted = _records(call.tool, call.args, result)
             call.calculation, calc_omitted = _calculation(call.tool, result)
+            call.count, call.total = _counts(call.tool, result)
             self._incomplete |= omitted or calc_omitted
             if isinstance(result, dict) and "error" in result:
+                status_code = result.get("status")
+                call.failure = FAILURES.get(status_code, "rejected") if isinstance(status_code, int) and not isinstance(status_code, bool) else "rejected"
                 call.settled = True
                 self._event(call, "failed" if call.operation == "read" else "rolled_back", final=True)
             elif call.operation == "read":
@@ -290,7 +411,7 @@ class EvidenceTrace:
         except Exception:
             self._incomplete = True
 
-    def failed(self, call_id: int | None, *, outcome: str = "rolled_back") -> None:
+    def failed(self, call_id: int | None, *, outcome: str = "rolled_back", reason: str = "error") -> None:
         if not self.enabled or call_id is None:
             return
         try:
@@ -298,6 +419,7 @@ class EvidenceTrace:
             if call is None or call.settled:
                 return
             call.settled = True
+            call.failure = reason if reason in FAILURE_KINDS else "error"
             status = "failed" if call.operation == "read" else outcome
             if status == "unknown":
                 self._incomplete = True
