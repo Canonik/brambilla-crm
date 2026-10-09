@@ -11,14 +11,24 @@ export function ClassPlate({
   size = "md",
   className,
   title,
+  emptyAs = "plate",
 }: {
   value: string | null | undefined;
   size?: "sm" | "md" | "lg";
   className?: string;
   title?: string;
+  /** In dense tables an empty class reads better as a plain dash. */
+  emptyAs?: "plate" | "dash";
 }) {
   const tone = classTone(value);
   const letter = (value ?? "").trim().toUpperCase() || "–";
+  if (letter === "–" && emptyAs === "dash") {
+    return (
+      <span className={cn("text-ink-3", className)} title="No class: no revenue in 2025" aria-label="No class">
+        –
+      </span>
+    );
+  }
   const sizes = {
     sm: "size-6 text-[12px] rounded-sm",
     md: "size-8 text-[15px] rounded-md",

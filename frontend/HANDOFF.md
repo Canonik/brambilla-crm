@@ -15,7 +15,7 @@ Owner: UI agent, branch `agent/ui`, worktree `~/projects/brambilla-ui`. Everythi
 ```sh
 cd frontend
 npm ci
-npm run dev          # http://localhost:5173, proxies API calls to VITE_DEV_PROXY_TARGET (default http://localhost:3000)
+npm run dev          # http://localhost:5173, proxies API calls to VITE_DEV_PROXY_TARGET (default http://127.0.0.1:8000)
 npm run build        # tsc -b && vite build  ->  frontend/dist
 npm test             # vitest, 42 tests
 npm run typecheck
@@ -37,15 +37,15 @@ The backend serves `frontend/dist` as static files with an SPA fallback (every u
 | `/tickets`, `/tickets/:id` | Tickets |
 | `/assistant` | Assistant, full page (also available as a side panel on every screen) |
 
-Suggested `ui` map for `GET /health`:
+`GET /health` `ui` map, as fixed by the integration contract (the UI does not read it):
 
 ```json
-{"companies": "/companies", "contacts": "/contacts", "deals": "/deals", "tickets": "/tickets", "dormant": "/dormant", "assistant": "/assistant"}
+{"companies": "/companies", "contacts": "/contacts", "deals": "/deals", "tickets": "/tickets", "lists": "/dormant", "assistant": "/assistant"}
 ```
 
 ## Authentication from the browser
 
-Every call carries `Authorization: Bearer <token>`. The token comes from `VITE_CRM_TOKEN` at build time (set it as a build arg or env on Railway if the Coordinator wants a zero-click UI), otherwise the UI shows a one-time sign-in screen and keeps the token in `localStorage`. A `401` clears it and shows the screen again. `GET /health` is called without a token.
+Every call carries `Authorization: Bearer <token>`. The UI shows a one-time sign-in screen and keeps the token in `localStorage`; a `401` clears it and shows the screen again. `GET /health` is called without a token. `VITE_CRM_TOKEN` is honoured only by development builds (`import.meta.env.DEV`) so a production bundle can never carry the token.
 
 ## Endpoints the UI calls
 

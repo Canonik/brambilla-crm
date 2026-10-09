@@ -6,7 +6,6 @@ import { useCurrentUser } from "@/app/currentUser";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
-import { Avatar } from "@/components/ui/Avatar";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/Table";
 import { ErrorState } from "@/components/ui/States";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -276,9 +275,6 @@ function Tile({ label, value, sub, to, loading, tone }: { label: string; value: 
         <div className={cn("mt-0.5 font-wide text-[26px] font-semibold tracking-tight pnum", tone === "warn" && value ? "text-warn" : "text-ink")}>{formatNumber(value)}</div>
       )}
       {sub && !loading ? <div className="text-[12px] text-ink-3">{sub}</div> : <div className="h-[18px]" />}
-      <span className="sr-only">
-        <Avatar name={label} size="xs" />
-      </span>
     </Link>
   );
 }

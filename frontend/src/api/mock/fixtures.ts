@@ -42,11 +42,19 @@ const chance = (p: number) => rnd() < p;
 const between = (lo: number, hi: number) => lo + rnd() * (hi - lo);
 const intBetween = (lo: number, hi: number) => Math.floor(between(lo, hi + 1));
 
+const NOW = Date.now();
+
 function isoDate(year: number, month?: number, day?: number, hour?: number) {
   const m = month ?? intBetween(1, 12);
   const d = day ?? intBetween(1, 28);
   const h = hour ?? intBetween(8, 18);
   return new Date(Date.UTC(year, m - 1, d, h, intBetween(0, 59))).toISOString();
+}
+
+/** A timestamp that is never in the future (for created/updated fields). */
+function pastIso(fromYear: number) {
+  const t = Date.parse(isoDate(fromYear));
+  return new Date(t > NOW ? NOW - intBetween(1, 120) * 86400000 - intBetween(0, 86399) * 1000 : t).toISOString();
 }
 
 const COMPANY_NAMES = [
@@ -325,7 +333,7 @@ export function buildMockDb(): MockDb {
       partita_iva: String(intBetween(10000000000, 99999999999)),
       id_legacy: String(intBetween(100000, 999999)),
       createdate: created,
-      hs_lastmodifieddate: isoDate(intBetween(2022, 2026)),
+      hs_lastmodifieddate: pastIso(intBetween(2022, 2026)),
       fatturato_2025: "0",
       classe_cliente: "",
     };
@@ -352,7 +360,7 @@ export function buildMockDb(): MockDb {
         associatedcompanyid: company.id,
         id_legacy: String(intBetween(1000000, 9999999)),
         createdate: created,
-        lastmodifieddate: isoDate(intBetween(2021, 2026)),
+        lastmodifieddate: pastIso(intBetween(2021, 2026)),
       };
       if (chance(0.7)) props.phone = `3${intBetween(20, 99)} ${intBetween(1000000, 9999999)}`;
       const c = row(props, created);
@@ -364,7 +372,7 @@ export function buildMockDb(): MockDb {
   for (let i = 0; i < 6; i++) {
     const first = pick(FIRST);
     const last = pick(LAST);
-    const created = isoDate(2025);
+    const created = pastIso(2025);
     const c = row(
       {
         firstname: first,
@@ -414,7 +422,7 @@ export function buildMockDb(): MockDb {
         commerciale: pick(activeUsers),
         id_legacy: String(intBetween(10000000, 99999999)),
         createdate: created,
-        hs_lastmodifieddate: isoDate(intBetween(2024, 2026)),
+        hs_lastmodifieddate: pastIso(intBetween(2024, 2026)),
       };
       if (amount !== null) {
         props.amount = amount.toFixed(2);
@@ -489,7 +497,7 @@ export function buildMockDb(): MockDb {
     const stageIdx = pick([0, 0, 1, 1, 2, 3, 3, 3, 3]);
     const stage = supportIds[stageIdx]!;
     const year = stageIdx === 3 ? pick([2021, 2023, 2024, 2025, 2026]) : 2026;
-    const created = isoDate(year, year === 2026 ? intBetween(1, 10) : undefined);
+    const created = year === 2026 ? pastIso(2026) : isoDate(year);
     const subjectBase = pick(TICKET_SUBJECTS);
     const subject = chance(0.4) ? `${subjectBase} - ordine ${intBetween(40000, 49999)}` : subjectBase;
     const props: Record<string, string> = {
