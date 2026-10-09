@@ -122,3 +122,52 @@ describe("assistant insights derivation", () => {
     expect(deriveInsights(projectEvidence({ version: 1, incomplete: false, events: [] })!).verdict).toBe("none");
   });
 });
+
+describe("grounding and write decision paths", () => {
+  const extended = {
+    version: 1,
+    incomplete: false,
+    events: [
+      { sequence: 1, call: 1, tool: "search_deals", operation: "read", status: "completed", count: 2, total: 2, records: [{ type: "deals", id: "41" }, { type: "deals", id: "42" }] },
+      { sequence: 2, call: 2, tool: "update_record", operation: "write", status: "committed", records: [{ type: "deals", id: "42" }], decisionPath: {
+        searches: [1], candidates: 2, chosen: { type: "deals", id: "42", label: "Fornitura Mazza", detail: "Como" }, action: "Moved the deal to Won",
+        automations: [{ rule: "R10", record: { type: "tickets", id: "88" } }],
+      } },
+    ],
+    grounding: {
+      facts: [
+        { text: "12.345,67", kind: "amount", status: "grounded", event: 1 },
+        { text: "buyer@example.it", kind: "email", status: "unverified", event: null },
+      ],
+      grounded: 1,
+      unverified: 1,
+    },
+  };
+
+  it("validates grounded facts and the read-to-write decision chain", () => {
+    const projected = projectEvidence(extended)!;
+    expect(projected.grounding).toEqual({
+      facts: [
+        { text: "12.345,67", kind: "amount", status: "grounded", event: 1 },
+        { text: "buyer@example.it", kind: "email", status: "unverified" },
+      ],
+      grounded: 1,
+      unverified: 1,
+    });
+    expect(projected.events[1]?.decisionPath).toEqual({
+      searches: [1], candidates: 2, chosen: { type: "deals", id: "42", label: "Fornitura Mazza", detail: "Como" }, action: "Moved the deal to Won",
+      automations: [{ rule: "R10", record: { type: "tickets", id: "88" } }],
+    });
+    expect(deriveInsights(projected).calls[1]?.decisionPath?.chosen).toEqual({ type: "deals", id: "42", label: "Fornitura Mazza", detail: "Como" });
+  });
+
+  it("fails closed when grounding points outside the trace or a decision references a non-read", () => {
+    const malformed = structuredClone(extended);
+    malformed.grounding.facts[0]!.event = 999;
+    malformed.events[1]!.decisionPath!.searches = [2];
+    const projected = projectEvidence(malformed)!;
+    expect(projected.incomplete).toBe(true);
+    expect(projected.grounding?.facts).toHaveLength(1);
+    expect(projected.events[1]?.decisionPath?.searches).toEqual([]);
+  });
+});
