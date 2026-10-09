@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 13:20 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:22 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -14,6 +14,7 @@ Workers never edit this file. Each worker keeps its own file in this directory o
 | 75d0043 | 12:32 | success | /health 200, SPA served, 401 without token | previous release, no authenticated checks run by the current coordinator |
 | a6e39d4 | 12:52 | success 12:53 | /health 200, SPA bundle hash matches local build, 401 without token | `hackitaly-good-001` (authenticated production checks still pending the token) |
 | 78feee0 | 13:17 | success 13:18 | authenticated read-only check 13:18: stats, legacy and dated reads, search totals equal to the oracle, pipelines, dormant list, owners, properties, labels, SPA routes; 40 parallel reads p95 0.24 s | `hackitaly-good-002`: assistant CSV tools, insights inspector, new UI; local unit 196, acceptance 65, vitest 60 |
+| d8c0fd4 | pending | pending | full local check: unit 227, form+conformity+dated 33, migration+rules 32 | release 4 candidate: exports 202 and filters, numeric validation, unique custom properties, closedate on close, list and import shapes, concurrency tests; push after the live assistant smoke finishes |
 | 2694c78 | 13:07 | success 13:08 | /health 200, bundle unchanged, 401 without token | dated route families, 4xx on malformed input, rate limit 50000/10 s; local: unit 176, form+conformity+dated 33, migration+rules 32 |
 
 Local evidence on a6e39d4 (server on 127.0.0.1:8040, database `brambilla_release`):
@@ -75,12 +76,12 @@ and 20-reader latency measurement (Agent 3 locally, Coordinator on Railway after
 |---|---|---|---|---|---|
 | 1 | FIXED in 2694c78 (f7d5273). Dated `2026-09` URL families were missing for pipelines, lists, owners, imports, exports, association batches and record associations (only objects and properties aliased). `tests/acceptance/test_dated_routes.py`: 5 of 7 fail. The organizer form check uses dated URLs. | conformity 10, possibly R9 reads | FIXED, deployed | Agent 3 | done 13:07 |
 | 2 | `/__agente` catch-all claims no changes even when earlier tool calls committed; choice-level model errors ignored | R13 quality | FIXED in 3e02c1c (c3b6ecd) | Agent 2 | done |
-| 3 | Export create 200 instead of 202; VIEW export ignores `filterGroups` and sorts | conformity | OPEN | Agent 3 | after 1 |
-| 4 | `Infinity` raises, `NaN` stored; `fmt_money` HALF_EVEN vs migration HALF_UP; line item without quantity gets no `amount` (patch 03 on agent/backend-audit) | conformity, R13 maths | OPEN | Agent 3 | after 1 |
-| 5 | `hasUniqueValue` not enforced for API-created custom properties (R7 itself safe via index) | conformity | OPEN | Agent 3 | after 1 |
-| 6 | `recordIdsAdded` spelling (docs: `recordsIdsAdded`); import response lacks `mappedObjectTypeIds` | conformity | OPEN | Agent 3 | after 1 |
+| 3 | Export create 200 instead of 202; VIEW export ignores `filterGroups` and sorts | conformity | FIXED in d8c0fd4 | Agent 3 | done |
+| 4 | `Infinity` raises, `NaN` stored; `fmt_money` HALF_EVEN vs migration HALF_UP; line item without quantity gets no `amount` (patch 03 on agent/backend-audit) | conformity, R13 maths | FIXED in d8c0fd4 | Agent 3 | done |
+| 5 | `hasUniqueValue` not enforced for API-created custom properties (R7 itself safe via index) | conformity | FIXED in d8c0fd4 | Agent 3 | done |
+| 6 | `recordIdsAdded` spelling (docs: `recordsIdsAdded`); import response lacks `mappedObjectTypeIds` | conformity | FIXED in d8c0fd4 | Agent 3 | done |
 | 7 | Ticket `Da:` fallback does not look at `hs_additional_emails` (patch 0002 on agent/score-optimization) | R5 hedge | FIXED in 3e02c1c | Agent 2 | done |
-| 9 | closedate not set when a deal enters a closed stage via API or assistant (HubSpot sets it) | R13 operations | OPEN, decided 13:08 | Agent 3 | 13:45 |
+| 9 | closedate not set when a deal enters a closed stage via API or assistant (HubSpot sets it) | R13 operations | FIXED in d8c0fd4 (ce68ed1) | Agent 3 | done |
 | 8 | Empty pipeline with `r1..r4` stage maps to Rinnovi while RICHIESTE says no pipeline means Vendite; zero rows in sample | R3, choice sheet | UNCLEAR, documented | Coordinator | choice sheet |
 
 Fixed since the audits (verified in code on a6e39d4): restart metadata loss (77c1f22), CSV delimiter hard-coded to `;`,
@@ -99,4 +100,5 @@ tickets with a dead contact reference use the `Da:` line.
 - 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
 - 13:17 Release 3 pushed (78feee0); Railway success 13:18; authenticated production checks pass; tagged `hackitaly-good-002`.
 - 13:19 Merging agent/backend-reliability 9e716c7 for release 4; full check running.
+- 13:21 Human authorized the live assistant smoke on production and release 4; smoke running (4 conversations).
 - 13:20 Production migration timing read from /__stats: the 13:10 organizer form check migrated the sample export in 30.9 s on Railway (build 17.3, copy 5.8, indexes 4.9); 538,354 records, 1,666,162 associations, 936 dormant, classes A 52 B 25 C 65, identical to the oracle.
