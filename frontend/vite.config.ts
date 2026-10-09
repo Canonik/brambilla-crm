@@ -9,7 +9,7 @@ import path from "node:path";
 // has to deal with CORS. Override the target with VITE_DEV_PROXY_TARGET.
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const proxyTarget = env.VITE_DEV_PROXY_TARGET || "http://localhost:3000";
+  const proxyTarget = env.VITE_DEV_PROXY_TARGET || "http://127.0.0.1:8000";
   const proxied = ["/crm", "/health", "/__agente", "/__reset", "/__migrate"];
 
   return {

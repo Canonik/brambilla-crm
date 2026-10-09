@@ -129,7 +129,7 @@ export function DormantCustomers() {
                     </TD>
                     <TD muted>{[c.properties.city, c.properties.state].filter(Boolean).join(", ") || <span className="text-ink-3">–</span>}</TD>
                     <TD align="center">
-                      <ClassPlate value={c.properties.classe_cliente} size="sm" />
+                      <ClassPlate value={c.properties.classe_cliente} size="sm" emptyAs="dash" />
                     </TD>
                     <TD align="right" numeric>
                       <Money amount={c.properties.fatturato_2025} currency="EUR" muted={!Number(c.properties.fatturato_2025)} />

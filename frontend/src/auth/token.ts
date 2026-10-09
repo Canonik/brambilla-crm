@@ -16,7 +16,14 @@ function readStorage(): string | null {
   }
 }
 
-let current: string | null = (import.meta.env.VITE_CRM_TOKEN as string | undefined)?.trim() || readStorage();
+// A build-time token is honoured only in development: production bundles are
+// public, so the token must never be baked into them.
+function envToken(): string | null {
+  if (!import.meta.env.DEV) return null;
+  return (import.meta.env.VITE_CRM_TOKEN as string | undefined)?.trim() || null;
+}
+
+let current: string | null = envToken() || readStorage();
 
 export function getToken(): string | null {
   return current;
@@ -46,5 +53,5 @@ export function subscribeToken(listener: Listener) {
 }
 
 export function tokenFromEnv(): boolean {
-  return Boolean((import.meta.env.VITE_CRM_TOKEN as string | undefined)?.trim());
+  return Boolean(envToken());
 }
