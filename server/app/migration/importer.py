@@ -533,9 +533,10 @@ class Migration:
         stage_ids = [s["id"] for s in ticket_pl["stages"]]
         contact_by_email = {}
         for c in self.contacts:
-            e = c.props.get("email")
-            if e and e not in contact_by_email:
-                contact_by_email[e] = c
+            emails = [c.props.get("email")] + (c.props.get("hs_additional_emails") or "").split(";")
+            for email in emails:
+                if email:
+                    contact_by_email.setdefault(email, c)
         from_da = 0
         n = 0
         for r in rows:
