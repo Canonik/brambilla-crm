@@ -409,6 +409,8 @@ class Store:
         if "objects_company_piva_uq" in msg:
             ex = self.conn.execute("SELECT id FROM objects WHERE object_type='companies' AND NOT archived AND properties->>'partita_iva' = %s", (props.get("partita_iva"),)).fetchone()
             return conflict(f"Company with partita_iva {props.get('partita_iva')} already exists. Existing ID: {ex['id'] if ex else 'unknown'}")
+        if "objects_uq_" in msg:
+            return conflict("A record with the same value for a unique property already exists")
         return conflict("Record already exists")
 
     def update(self, object_type: str, id_value, properties: dict, id_property: str | None = None, *, run_rules: bool = True) -> dict:
