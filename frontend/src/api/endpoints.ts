@@ -611,6 +611,11 @@ export function getHealth() {
   return call<Health>("/health", { anonymous: true });
 }
 
+/**
+ * The bare contract returns exactly `{reply}`. With `?trace=1` the backend may
+ * add `trace`, the list of tool calls behind the answer; the chat shows it
+ * only when present.
+ */
 export function askAssistant(body: AgentRequest, signal?: AbortSignal) {
-  return call<AgentResponse>("/__agente", { method: "POST", body, signal });
+  return call<AgentResponse>("/__agente", { method: "POST", body, signal, query: { trace: 1 } });
 }
