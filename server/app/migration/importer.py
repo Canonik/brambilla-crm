@@ -31,6 +31,20 @@ REVENUE_YEAR = 2025
 ACTIVITY_BODY = {"notes": "hs_note_body", "calls": "hs_call_body", "emails": "hs_email_text", "meetings": "hs_meeting_body"}
 
 
+OBJECT_INDEXES = ["objects_type_id_idx", "objects_id_legacy_idx", "objects_contact_email_uq", "objects_company_piva_uq", "objects_company_domain_idx", "objects_sku_idx", "objects_name_lower_idx", "objects_dealname_lower_idx"]
+ASSOC_INDEXES = ["associations_from_totype_idx", "associations_to_idx"]
+
+
+def _index_ddl() -> list[str]:
+    here = os.path.join(os.path.dirname(__file__), "..", "schema.sql")
+    with open(here, encoding="utf-8") as fh:
+        stmts = [s.strip() for s in fh.read().split(";") if s.strip()]
+    return [s for s in stmts if s.upper().startswith("CREATE INDEX") or s.upper().startswith("CREATE UNIQUE INDEX")]
+
+
+INDEX_DDL = _index_ddl()
+
+
 def resume_pending():
     return None
 
@@ -67,8 +81,10 @@ def read_export(data: bytes) -> dict[str, list[dict]]:
         delimiter = ";" if sample.count(";") >= sample.count(",") else ","
         reader = csv.DictReader(io.StringIO(text, newline=""), delimiter=delimiter)
         rows = []
-        for r in reader:
-            rows.append({(k or "").strip().lower(): (v if isinstance(v, str) else "") for k, v in r.items() if k is not None})
+        for i, r in enumerate(reader):
+            d = {(k or "").strip().lower(): (v if isinstance(v, str) else "") for k, v in r.items() if k is not None}
+            d["_row_idx"] = i
+            rows.append(d)
         out[stem] = rows
     missing = [f for f in FILES if f not in out]
     if missing:
@@ -108,6 +124,17 @@ class UnionFind:
 
 def _mod(row: dict) -> dt.datetime:
     return P.parse_dt(row.get("ultima_modifica")) or dt.datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _mod_key(row: dict):
+    """Most recent ultima_modifica wins; on a tie the later file row wins."""
+    return (_mod(row), row.get("_row_idx", 0))
+
+
+def _norm_text(s: str | None) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", P.fix_text(s) or "").encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", t.strip().lower())
 
 
 def _merge_field(rows_desc: list[dict], getter) -> str | None:
@@ -164,7 +191,7 @@ class Migration:
             groups[uf.find(("id", lid))].append(lid)
         merged = 0
         for members in groups.values():
-            rs = sorted((info[m][0] for m in members), key=_mod, reverse=True)
+            rs = sorted((info[m][0] for m in members), key=_mod_key, reverse=True)
             newest = rs[0]
             if len(rs) > 1:
                 merged += len(rs) - 1
@@ -197,74 +224,77 @@ class Migration:
         rows = [r for r in self.files["contatti"] if not P.is_deleted(r.get("cancellato"))]
         self.stats["contatti_rows"] = len(self.files["contatti"])
         self.stats["contatti_deleted"] = len(self.files["contatti"]) - len(rows)
-        parsed = []  # (row, emails, phone_from_email, company_rec)
+        parsed = []  # per row: dict with emails, phone, company, name key
         uf = UnionFind()
         for i, r in enumerate(rows):
-            emails, phone = P.parse_emails(r.get("email"))
+            emails, phone_like = P.parse_emails(r.get("email"))
             comp = self.company_by_legacy.get(P.clean(r.get("id_azienda")))
-            parsed.append((r, emails, phone, comp))
+            parsed.append({
+                "row": r, "emails": emails, "phone": P.clean(r.get("telefono")) or (phone_like or ""), "company": comp,
+                "name": _norm_text(r.get("nome")) + "|" + _norm_text(r.get("cognome")),
+            })
             uf.find(i)
             for e in emails:
                 uf.union(i, ("email", e))
-        # name + company merge (DECISIONS 2.2): same normalized name inside the same company,
-        # unless that would join two different valid emails
-        by_name_company: dict[tuple, list[int]] = defaultdict(list)
-        for i, (r, emails, phone, comp) in enumerate(parsed):
-            if comp is None:
-                continue
-            key = (id(comp), re.sub(r"\s+", " ", P.clean(r.get("nome")).lower()), re.sub(r"\s+", " ", P.clean(r.get("cognome")).lower()))
-            if key[1] or key[2]:
-                by_name_company[key].append(i)
+        # DECISIONS 2.2: same name inside the same company joins the same person, unless that would
+        # join two different valid emails (sequential, first row of the (name, company) key is the anchor)
+        comp_emails: dict = defaultdict(set)
+        for i, p in enumerate(parsed):
+            comp_emails[uf.find(i)].update(p["emails"])
+        anchor: dict[tuple, int] = {}
         name_merges = 0
-        for key, idxs in by_name_company.items():
-            if len(idxs) < 2:
+        for i, p in enumerate(parsed):
+            if p["company"] is None or p["name"] == "|":
                 continue
-            roots = {uf.find(i) for i in idxs}
-            if len(roots) < 2:
+            key = (p["name"], id(p["company"]))
+            if key not in anchor:
+                anchor[key] = i
                 continue
-            emails_in_group = {e for i in idxs for e in parsed[i][1]}
-            if len(emails_in_group) > 1:
+            ra, rb = uf.find(anchor[key]), uf.find(i)
+            if ra == rb:
                 continue
-            first = idxs[0]
-            for j in idxs[1:]:
-                uf.union(first, j)
-                name_merges += 1
+            ea, eb = comp_emails[ra], comp_emails[rb]
+            if ea and eb and not (ea & eb):
+                continue
+            uf.union(ra, rb)
+            comp_emails[uf.find(ra)] = ea | eb
+            name_merges += 1
         groups: dict = defaultdict(list)
         for i in range(len(parsed)):
             groups[uf.find(i)].append(i)
         merged = 0
         for idxs in groups.values():
-            rs = sorted((parsed[i] for i in idxs), key=lambda p: _mod(p[0]), reverse=True)
-            newest = rs[0][0]
+            ps = sorted((parsed[i] for i in idxs), key=lambda p: _mod_key(p["row"]), reverse=True)
+            rs = [p["row"] for p in ps]
+            newest = rs[0]
             if len(rs) > 1:
                 merged += len(rs) - 1
+            email = _merge_field(ps, lambda p: p["emails"][0] if p["emails"] else None)
             all_emails: list[str] = []
-            for p in rs:
-                for e in p[1]:
+            for p in ps:
+                for e in p["emails"]:
                     if e not in all_emails:
                         all_emails.append(e)
-            email = all_emails[0] if all_emails else None
-            phone = _merge_field([p[0] for p in rs], lambda r: P.clean(r.get("telefono")))
-            if not phone:
-                phone = _merge_field(rs, lambda p: p[2])
+            extra_emails = [e for e in all_emails if e != email]
+            tipo = _merge_field(rs, lambda r: P.clean(r.get("tipo")))
             props = {
-                "firstname": _merge_field([p[0] for p in rs], lambda r: P.clean(r.get("nome"))),
-                "lastname": _merge_field([p[0] for p in rs], lambda r: P.clean(r.get("cognome"))),
+                "firstname": _merge_field(rs, lambda r: P.clean(r.get("nome"))),
+                "lastname": _merge_field(rs, lambda r: P.clean(r.get("cognome"))),
                 "email": email,
-                "phone": phone,
-                "lifecyclestage": _merge_field([p[0] for p in rs], lambda r: P.lifecycle_stage(r.get("tipo"))),
+                "phone": _merge_field(ps, lambda p: p["phone"]),
+                "lifecyclestage": P.lifecycle_stage(tipo) if tipo else None,
                 "id_legacy": P.clean(newest.get("id_contatto")),
             }
-            if len(all_emails) > 1:
-                props["hs_additional_emails"] = ";".join(all_emails[1:])
+            if extra_emails:
+                props["hs_additional_emails"] = ";".join(extra_emails)
             if email:
                 props["hs_email_domain"] = email.rsplit("@", 1)[1]
-            comp = _merge_field(rs, lambda p: p[3])
-            rec = Rec("contacts", {k: v for k, v in props.items() if v not in (None, "")}, self.now, _mod(newest), [P.clean(p[0].get("id_contatto")) for p in rs])
+            comp = _merge_field(ps, lambda p: p["company"])
+            rec = Rec("contacts", {k: v for k, v in props.items() if v not in (None, "")}, self.now, _mod(newest), [P.clean(r.get("id_contatto")) for r in rs])
             self.records.append(rec)
             self.contacts.append(rec)
-            for p in rs:
-                self.contact_by_legacy[P.clean(p[0].get("id_contatto"))] = rec
+            for r in rs:
+                self.contact_by_legacy[P.clean(r.get("id_contatto"))] = rec
             if comp is not None:
                 self.contact_company[id(rec)] = comp
         self.stats["contacts"] = len(self.contacts)
@@ -311,7 +341,7 @@ class Migration:
             if code:
                 groups[code].append(r)
         for code, rs in groups.items():
-            rs = sorted(rs, key=_mod, reverse=True)
+            rs = sorted(rs, key=_mod_key, reverse=True)
             newest = rs[0]
             price = _merge_field(rs, lambda r: P.parse_number(r.get("prezzo_listino")))
             props = {
@@ -386,10 +416,14 @@ class Migration:
                     code = P.product_code(lr.get("codice_articolo"))
                     prod = self.product_by_code.get(code) if code else None
                     qty = P.parse_number(lr.get("quantita"))
+                    if qty is None:
+                        qty = Decimal(0)
                     price = P.parse_number(lr.get("prezzo_unitario"))
                     if price is None and prod is not None and prod.props.get("price") is not None:
                         price = Decimal(prod.props["price"])
                         lines_price_fallback += 1
+                    if price is None:
+                        price = Decimal(0)
                     if prod is None:
                         lines_no_product += 1
                     disc = P.parse_percent(lr.get("sconto"))
@@ -416,7 +450,7 @@ class Migration:
                     line_recs.append(lrec)
                 if any_total:
                     amount = total
-                    currency = "EUR"
+                    currency = P.parse_currency(r.get("importo"), r.get("valuta")) or "EUR"
                     amount_from_lines += 1
             # close date
             closedate = P.parse_dt(r.get("data_chiusura"))
@@ -425,13 +459,8 @@ class Migration:
                 target = ("renewal", 2 if won else 3) if fam == "renewal" else ("sales", 5 if won else 6)
                 entries = [d for d, s, _ in h if s == target]
                 if entries:
-                    closedate = entries[-1]
+                    closedate = max(entries)
                     closedate_from_history += 1
-                elif h:
-                    closedate = h[-1][0]
-                    closedate_from_history += 1
-                else:
-                    closedate = _mod(r)
             hint_ids = {P.clean(x.get("id_utente")).upper() for _, _, x in h if P.clean(x.get("id_utente"))}
             resolved = self.users.resolve(r.get("id_commerciale"), hint_ids)
             owner = self.users.effective(resolved)
@@ -515,10 +544,9 @@ class Migration:
             if not lid:
                 continue
             idx = P.ticket_stage(r.get("stato"))
-            opened = P.parse_dt(r.get("aperto_il")) or _mod(r)
+            opened_raw = P.parse_dt(r.get("aperto_il"))
+            opened = opened_raw or _mod(r)
             closed = P.parse_dt(r.get("chiuso_il"))
-            if idx == 3 and closed is None:
-                closed = _mod(r)
             owner = self.users.effective(self.users.resolve(r.get("id_utente")))
             content = P.clean(r.get("descrizione"))
             props = {
@@ -527,7 +555,7 @@ class Migration:
                 "hs_pipeline": ticket_pl["id"],
                 "hs_pipeline_stage": stage_ids[idx],
                 "hs_ticket_priority": P.ticket_priority(r.get("priorita")),
-                "createdate": iso(opened),
+                "createdate": iso(opened_raw) if opened_raw else None,
                 "closed_date": iso(closed) if closed else None,
                 "assegnatario": owner["email"] if owner else None,
                 "id_legacy": lid,
@@ -536,7 +564,7 @@ class Migration:
             self.records.append(rec)
             n += 1
             contact = self.contact_by_legacy.get(P.clean(r.get("id_contatto")))
-            if contact is None and not P.clean(r.get("id_contatto")):
+            if contact is None:
                 m = re.match(r"^\s*Da:\s*<?([^\s<>]+@[^\s<>]+)>?", content, re.I)
                 if m:
                     contact = contact_by_email.get(m.group(1).lower())
@@ -729,10 +757,11 @@ def run_migration(url: str) -> dict:
         assoc_rows = set()
         for f, t, tid in m.assocs:
             lab = defaults.ASSOC_BY_ID[tid]
-            assoc_rows.add((f.id, t.id, tid, f.type, t.type, "HUBSPOT_DEFINED"))
+            cat = "USER_DEFINED" if tid in (901, 902) else "HUBSPOT_DEFINED"
+            assoc_rows.add((f.id, t.id, tid, f.type, t.type, cat))
             inv = lab[5]
             if inv is not None:
-                assoc_rows.add((t.id, f.id, inv, t.type, f.type, "HUBSPOT_DEFINED"))
+                assoc_rows.add((t.id, f.id, inv, t.type, f.type, cat))
         # company contact counts
         cc = defaultdict(int)
         for c in m.contacts:
@@ -742,10 +771,17 @@ def run_migration(url: str) -> dict:
         for c in m.companies:
             if cc.get(c.id):
                 c.props["num_associated_contacts"] = str(cc[c.id])
-        # write
-        conn.execute("ALTER TABLE objects SET (autovacuum_enabled = false)")
+        # write: drop secondary indexes, bulk COPY, rebuild
+        conn.execute("SET LOCAL synchronous_commit = off")
+        conn.execute("SET LOCAL maintenance_work_mem = '256MB'")
+        for idx in OBJECT_INDEXES + ASSOC_INDEXES:
+            conn.execute(f"DROP INDEX IF EXISTS {idx}")
+        conn.execute("ALTER TABLE associations DROP CONSTRAINT IF EXISTS associations_pkey")
+        t_w0 = time.time()
         _copy_objects(conn, m.records)
-        _copy_assocs(conn, sorted(assoc_rows))
+        t_w1 = time.time()
+        _copy_assocs(conn, assoc_rows)
+        t_w2 = time.time()
         dom_rows = set()
         for c in m.companies:
             if c.props.get("domain"):
@@ -767,9 +803,12 @@ def run_migration(url: str) -> dict:
                 copy.set_types(["int8", "int8", "timestamptz"])
                 for c in m.dormant:
                     copy.write_row((int(lst["listId"]), c.id, now))
-        conn.execute("ALTER TABLE objects SET (autovacuum_enabled = true)")
+        conn.execute("ALTER TABLE associations ADD PRIMARY KEY (from_id, to_id, type_id)")
+        for ddl in INDEX_DDL:
+            conn.execute(ddl)
+        t_w3 = time.time()
         t_write = time.time() - t0
-        m.stats.update({"records": len(m.records), "associations": len(assoc_rows), "seconds_download": round(t_dl, 1), "seconds_build": round(t_build, 1), "seconds_total": round(t_write, 1), "migrated_at": iso(now), "source": url[:200]})
+        m.stats.update({"records": len(m.records), "associations": len(assoc_rows), "seconds_download": round(t_dl, 1), "seconds_build": round(t_build, 1), "seconds_copy_objects": round(t_w1 - t_w0, 1), "seconds_copy_assocs": round(t_w2 - t_w1, 1), "seconds_indexes": round(t_w3 - t_w2, 1), "seconds_total": round(t_write, 1), "migrated_at": iso(now), "source": url[:200]})
         conn.execute("INSERT INTO meta (key, value) VALUES ('migration', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", (Jsonb(m.stats),))
         conn.commit()
     invalidate_caches()
