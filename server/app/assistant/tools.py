@@ -163,6 +163,12 @@ class ToolContext:
                 return {"total": len(results), "results": results}
         return {"total": res["total"], "results": results}
 
+    def _pipeline(self, store: Store, object_type: str, pipeline: str) -> dict | None:
+        value = str(pipeline).strip()
+        if object_type == "deals" and value.lower() == "vendite":
+            value = "default"
+        return store.pipeline_by_label(object_type, value) or next((p for p in store.pipelines(object_type) if p["id"] == value), None)
+
     def search_deals(self, store: Store, name=None, company_id=None, contact_id=None, pipeline=None, stage=None, commerciale=None, closed_from=None, closed_to=None, open_only=None, query=None, limit=15):
         filters = []
         if company_id:
@@ -170,13 +176,16 @@ class ToolContext:
         if contact_id:
             filters.append({"propertyName": "associations.contact", "operator": "IN", "values": [str(contact_id)]})
         if pipeline:
-            pl = store.pipeline_by_label("deals", pipeline) or next((p for p in store.pipelines("deals") if p["id"] == pipeline), None)
-            if pl:
-                filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pl["id"]})
+            pl = self._pipeline(store, "deals", pipeline)
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {pipeline}"}
+            pipeline = pl["id"]
+            filters.append({"propertyName": "pipeline", "operator": "EQ", "value": pipeline})
         if stage:
             sid = self._stage_id(store, "deals", stage, pipeline)
-            if sid:
-                filters.append({"propertyName": "dealstage", "operator": "EQ", "value": sid})
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            filters.append({"propertyName": "dealstage", "operator": "EQ", "value": sid})
         if commerciale:
             filters.append({"propertyName": "commerciale", "operator": "EQ", "value": commerciale.strip().lower()})
         if closed_from:
@@ -196,8 +205,9 @@ class ToolContext:
             filters.append({"propertyName": "associations.contact", "operator": "IN", "values": [str(contact_id)]})
         if stage:
             sid = self._stage_id(store, "tickets", stage, None)
-            if sid:
-                filters.append({"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": sid})
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            filters.append({"propertyName": "hs_pipeline_stage", "operator": "EQ", "value": sid})
         if assegnatario:
             filters.append({"propertyName": "assegnatario", "operator": "EQ", "value": assegnatario.strip().lower()})
         if priority:
@@ -271,6 +281,118 @@ class ToolContext:
         out["last_activities"] = self.list_activities(store, company_id=str(cid), limit=8)["results"]
         return out
 
+    def list_deal_line_items(self, store: Store, deal_id: str, limit: int = 25, after: str | None = None):
+        """Return a bounded, pageable view of a deal's line items and products."""
+        deal = store.get("deals", deal_id)
+        did = int(deal["id"])
+        page_limit = min(max(int(limit or MAX_LIST), 1), MAX_LIST)
+
+        params: list = [did]
+        after_sql = ""
+        if after not in (None, ""):
+            try:
+                after_id = int(str(after))
+            except ValueError:
+                return {"error": f"cursore di paginazione non valido: {after}"}
+            after_sql = " AND a.to_id > %s"
+            params.append(after_id)
+        params.append(page_limit + 1)
+
+        rows = store.conn.execute(
+            f"""
+            WITH page AS (
+                SELECT DISTINCT a.to_id AS line_item_id
+                FROM associations a
+                JOIN objects line_item
+                  ON line_item.id = a.to_id
+                 AND line_item.object_type = 'line_items'
+                 AND NOT line_item.archived
+                WHERE a.from_id = %s
+                  AND a.from_type = 'deals'
+                  AND a.to_type = 'line_items'
+                  {after_sql}
+                ORDER BY a.to_id
+                LIMIT %s
+            )
+            SELECT line_item.*,
+                   product.id AS product_id,
+                   product.properties AS product_properties
+            FROM page
+            JOIN objects line_item ON line_item.id = page.line_item_id
+            LEFT JOIN LATERAL (
+                SELECT p.id, p.properties
+                FROM associations product_assoc
+                JOIN objects p
+                  ON p.id = product_assoc.to_id
+                 AND p.object_type = 'products'
+                 AND NOT p.archived
+                WHERE product_assoc.from_id = line_item.id
+                  AND product_assoc.from_type = 'line_items'
+                  AND product_assoc.to_type = 'products'
+                ORDER BY p.id
+                LIMIT 1
+            ) product ON TRUE
+            ORDER BY line_item.id
+            """,
+            params,
+        ).fetchall()
+
+        truncated = len(rows) > page_limit
+        rows = rows[:page_limit]
+        results = []
+        for row in rows:
+            props = row["properties"]
+            product_props = row["product_properties"] or {}
+            product = None
+            if row["product_id"] is not None:
+                product = {
+                    "id": str(row["product_id"]),
+                    "name": product_props.get("name"),
+                    "sku": product_props.get("hs_sku"),
+                    "unit_price": product_props.get("price"),
+                }
+            results.append({
+                "id": str(row["id"]),
+                "id_legacy": props.get("id_legacy"),
+                "name": props.get("name"),
+                "sku": props.get("hs_sku"),
+                "quantity": props.get("quantity"),
+                "unit_price": props.get("price"),
+                "discount": {
+                    "percentage": props.get("hs_discount_percentage"),
+                    "unit_amount": props.get("discount"),
+                    "total_amount": props.get("hs_total_discount"),
+                },
+                "amount": props.get("amount"),
+                "currency": props.get("hs_line_item_currency_code"),
+                "product": product,
+            })
+
+        total = store.conn.execute(
+            """
+            SELECT count(DISTINCT a.to_id) AS n
+            FROM associations a
+            JOIN objects line_item
+              ON line_item.id = a.to_id
+             AND line_item.object_type = 'line_items'
+             AND NOT line_item.archived
+            WHERE a.from_id = %s
+              AND a.from_type = 'deals'
+              AND a.to_type = 'line_items'
+            """,
+            (did,),
+        ).fetchone()["n"]
+        next_page = {"after": str(rows[-1]["id"])} if truncated and rows else None
+        return {
+            "deal_id": str(did),
+            "total": total,
+            "returned": len(results),
+            "limit": page_limit,
+            "truncated": truncated,
+            "paging": {"next": next_page},
+            "results": results,
+        }
+
     def list_activities(self, store: Store, contact_id=None, deal_id=None, company_id=None, year=None, limit=15):
         limit = min(int(limit or 15), MAX_LIST)
         params: list = []
@@ -328,15 +450,18 @@ class ToolContext:
             where.append("properties->>'commerciale' = %s")
             params.append(commerciale.strip().lower())
         if pipeline:
-            pl = store.pipeline_by_label("deals", pipeline) or next((p for p in store.pipelines("deals") if p["id"] == pipeline), None)
-            if pl:
-                where.append("properties->>'pipeline' = %s")
-                params.append(pl["id"])
+            pl = self._pipeline(store, "deals", pipeline)
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {pipeline}"}
+            pipeline = pl["id"]
+            where.append("properties->>'pipeline' = %s")
+            params.append(pipeline)
         if stage:
             sid = self._stage_id(store, "deals", stage, pipeline)
-            if sid:
-                where.append("properties->>'dealstage' = %s")
-                params.append(sid)
+            if sid is None:
+                return {"error": f"fase sconosciuta: {stage}"}
+            where.append("properties->>'dealstage' = %s")
+            params.append(sid)
         if year:
             where.append("properties->>'closedate' >= %s AND properties->>'closedate' < %s")
             params.extend([f"{int(year)}-01-01", f"{int(year) + 1}-01-01"])
@@ -409,6 +534,11 @@ class ToolContext:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
         props = dict(properties or {})
         if ot == "deals":
+            if props.get("pipeline"):
+                pl = self._pipeline(store, "deals", props["pipeline"])
+                if pl is None:
+                    return {"error": f"pipeline sconosciuta: {props['pipeline']}"}
+                props["pipeline"] = pl["id"]
             props.setdefault("commerciale", self.user_email)
             if props.get("dealstage") and not store.stage_lookup("deals", props["dealstage"]):
                 sid = self._stage_id(store, "deals", props["dealstage"], props.get("pipeline"))
@@ -465,6 +595,11 @@ class ToolContext:
         if ot is None:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
         props = dict(properties or {})
+        if ot == "deals" and props.get("pipeline"):
+            pl = self._pipeline(store, "deals", props["pipeline"])
+            if pl is None:
+                return {"error": f"pipeline sconosciuta: {props['pipeline']}"}
+            props["pipeline"] = pl["id"]
         if ot == "deals" and props.get("dealstage") and not store.stage_lookup("deals", props["dealstage"]):
             cur = store.get("deals", id)["properties"]
             sid = self._stage_id(store, "deals", props["dealstage"], props.get("pipeline") or cur.get("pipeline"))
@@ -520,8 +655,13 @@ class ToolContext:
         ot = defaults.resolve_type(object_type)
         if ot is None:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
+        records = records or []
+        if not isinstance(records, list):
+            return {"error": "records deve essere una lista", "status": 400}
+        if len(records) > 200:
+            return {"error": "massimo 200 record per chiamata; suddividi l'elenco in più chiamate", "status": 400}
         results = []
-        for rec in (records or [])[:200]:
+        for rec in records:
             props = rec.get("properties") if isinstance(rec, dict) and "properties" in rec else rec
             assoc = rec.get("associations") if isinstance(rec, dict) else None
             results.append(self.create_record(store, ot, props or {}, assoc))
@@ -550,6 +690,7 @@ TOOL_SCHEMAS = [
     _schema("search_tickets", "Cerca ticket di assistenza per oggetto, azienda, contatto, fase, assegnatario, priorità, solo aperti.", {"subject": S("oggetto o parte"), "company_id": S("id azienda"), "contact_id": S("id contatto"), "stage": S("Aperto, In lavorazione, In attesa del cliente, Chiuso"), "assegnatario": S("email"), "priority": S("LOW, MEDIUM, HIGH, URGENT"), "open_only": B("solo non chiusi"), "limit": I("max risultati")}),
     _schema("get_record", "Legge un record completo (proprietà e associazioni) dato tipo e id.", {"object_type": S("companies, contacts, deals, tickets, products, line_items, notes, calls, emails, meetings, tasks"), "id": S("id del record")}, ["object_type", "id"]),
     _schema("company_overview", "Scheda completa di un'azienda: dati, fatturato 2025 e classe, contatti, trattative, ticket, ultime attività. Usala per domande su un cliente.", {"company_id": S("id azienda")}, ["company_id"]),
+    _schema("list_deal_line_items", "Elenca le righe di una trattativa con id corrente e legacy, nome, SKU, quantità, prezzo unitario, sconto, importo e prodotto associato. Restituisce totale, troncamento e cursore per la pagina successiva.", {"deal_id": S("id trattativa"), "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "max risultati (default 25)"}, "after": S("cursore restituito da paging.next.after")}, ["deal_id"]),
     _schema("list_activities", "Elenca note, chiamate, email, riunioni e task di un contatto, di una trattativa o di un'azienda, opzionalmente di un anno.", {"contact_id": S("id contatto"), "deal_id": S("id trattativa"), "company_id": S("id azienda"), "year": I("anno"), "limit": I("max risultati")}),
     _schema("revenue", "Fatturato di un'azienda in un anno con la regola R8 (trattative vinte/rinnovate chiuse nell'anno, storni sottratti, USD x0.92, GBP x1.17). Calcolo deterministico.", {"company_id": S("id azienda"), "year": I("anno, default 2025")}, ["company_id"]),
     _schema("deal_stats", "Conteggi e totali in euro delle trattative, per fase, filtrabili per azienda, commerciale, pipeline, fase, anno di chiusura, solo aperte.", {"company_id": S("id azienda"), "commerciale": S("email commerciale"), "pipeline": S("Vendite o Rinnovi"), "stage": S("fase"), "year": I("anno di closedate"), "open_only": B("solo aperte")}),
@@ -575,6 +716,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | 
         return {"error": f"strumento sconosciuto: {name}"}
     with db.connection() as conn:
         store = Store(conn, ctx.now)
+        write_start = len(ctx.writes)
         try:
             out = fn(store, **(args or {}))
             if observer:
@@ -584,6 +726,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | 
                 observer.transaction_finished(call_id, "committed")
             return out
         except ApiError as e:
+            del ctx.writes[write_start:]
             outcome = "rolled_back"
             try:
                 conn.rollback()
@@ -593,6 +736,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | 
                 observer.failed(call_id, outcome=outcome)
             return {"error": e.message, "status": e.status}
         except TypeError as e:
+            del ctx.writes[write_start:]
             outcome = "rolled_back"
             try:
                 conn.rollback()
@@ -602,6 +746,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict, observer: EvidenceTrace | 
                 observer.failed(call_id, outcome=outcome)
             return {"error": f"argomenti non validi: {e}"}
         except Exception as e:
+            del ctx.writes[write_start:]
             outcome = "rolled_back"
             try:
                 conn.rollback()
