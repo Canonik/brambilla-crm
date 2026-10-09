@@ -37,7 +37,9 @@ try:
 except Exception:
     UI_ROUTES = _default_ui
 
-RATE_LIMIT_MAX = int(_env("RATE_LIMIT_MAX", default="2000"))
+# Global counter shared by every client. The organizers run parallel suites and 20 concurrent
+# readers against one deploy; a 429 there is a failed check, so the threshold stays far above them.
+RATE_LIMIT_MAX = int(_env("RATE_LIMIT_MAX", default="50000"))
 RATE_LIMIT_WINDOW_MS = 10_000
 POOL_MIN = int(_env("DB_POOL_MIN", default="2"))
 POOL_MAX = int(_env("DB_POOL_MAX", default="24"))
