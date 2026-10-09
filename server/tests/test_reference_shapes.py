@@ -78,3 +78,19 @@ def test_list_record_memberships_and_all(api):
     other = api.post(f"/crm/lists/{V}", headers=H, json={"name": "Due", "objectTypeId": "0-2", "processingType": "MANUAL"}).json()["list"]["listId"]
     assert api.put(f"/crm/lists/{V}/{other}/memberships/add-from/{lid}", headers=H).status_code == 204
     assert api.get(f"/crm/lists/{V}/{other}/memberships", headers=H).json()["total"] == 1
+
+
+def test_property_create_requires_documented_fields_and_duplicates_conflict(api):
+    r = api.post(f"/crm/properties/{V}/contacts", headers=H, json={"name": "solo_nome"})
+    assert r.status_code == 400 and r.json()["category"] == "VALIDATION_ERROR"
+    body = {"name": "dup_prop", "label": "Dup", "type": "string", "fieldType": "text", "groupName": "contactinformation"}
+    assert api.post(f"/crm/properties/{V}/contacts", headers=H, json=body).status_code == 201
+    r = api.post(f"/crm/properties/{V}/contacts", headers=H, json=body)
+    assert r.status_code == 409 and r.json()["category"] == "CONFLICT"
+
+
+def test_search_query_limit_and_batch_trace_ids(api):
+    assert api.post(f"/crm/objects/{V}/contacts/search", headers=H, json={"query": "x" * 3001}).status_code == 400
+    r = api.post(f"/crm/objects/{V}/contacts/batch/create", headers=H, json={"inputs": [{"properties": {"email": "ok.t@example.com"}, "objectWriteTraceId": "t1"}, {"properties": {"email": "bad"}, "objectWriteTraceId": "t2"}]})
+    assert r.status_code == 207 and r.json()["numErrors"] == 1
+    assert r.json()["errors"][0]["context"]["objectWriteTraceId"] == ["t2"]

@@ -123,7 +123,8 @@ async def batch_create(object_type: str, request: Request):
                 with conn.transaction():
                     results.append(s.create(ot, inp.get("properties") or {}, inp.get("associations")))
             except ApiError as e:
-                errors.append({"status": "error", "category": e.category, "message": e.message, "context": {}})
+                trace = inp.get("objectWriteTraceId")
+                errors.append({"status": "error", "category": e.category, "message": e.message, "context": {"objectWriteTraceId": [str(trace)]} if trace is not None else {}})
         conn.commit()
     return _batch_response(results, errors, started, 201)
 
