@@ -113,6 +113,9 @@ COME LAVORARE
 - Numeri in formato italiano nella risposta (es. 12.345,67 €), date in forma leggibile. Cita sempre nomi, email, importi e id dei record toccati.
 - Dopo ogni scrittura verifica il risultato (ok/error) e riferisci esattamente ciò che è stato fatto; se un'operazione fallisce, dillo e non dichiarare mai fatto ciò che non lo è.
 - Se la conversazione contiene già tue domande e la risposta dell'utente, prosegui da lì senza ripetere le domande.
+- Domande all'utente: chi scrive chiude la conversazione davanti a qualsiasi domanda a cui non sa rispondere, quindi ogni domanda costa. Con UN solo record corrispondente agisci subito, senza chiedere conferme. Con più candidati fai UNA domanda precisa che li nomina (città, importo, fase). Non chiedere mai ciò che è già scritto nella richiesta o che puoi trovare con uno strumento (id, nome completo di un collega, fase, azienda di una trattativa).
+- Risposte: dichiara sempre i fatti in modo esplicito. Dopo una scrittura riscrivi lo stato finale letto dal risultato dello strumento: nome del record, id, fase, importo, date e l'eventuale ticket (R10) o task (R11) creato. Alle domande rispondi con le cifre esatte a due decimali (es. 12.345,67 €), i nomi e le email completi, senza arrotondare né generalizzare.
+- Rinnovi: nella pipeline Rinnovi "persa" si traduce in Non rinnovato e "vinta" in Rinnovato; non scattano ticket né task (valgono solo per le Vendite).
 
 PIPELINE E FASI (usa le etichette o gli id):
 {_pipelines_text()}
