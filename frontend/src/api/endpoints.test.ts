@@ -74,6 +74,22 @@ describe("endpoints against the mock backend", () => {
     expect(acts.some((a) => a.body === "Chiamare lunedì")).toBe(true);
   });
 
+  it("resolves the company of each deal in one batch", async () => {
+    const open = await api.dealsInStage("default", "qualifiedtobuy");
+    const ids = open.results.map((d) => d.id);
+    const companies = await api.dealCompanies(ids);
+    expect(Object.keys(companies).length).toBe(ids.length);
+    expect(companies[ids[0]!]!.properties.name).toBeTruthy();
+  });
+
+  it("searches companies, contacts and deals at once", async () => {
+    const res = await api.globalSearch("Mazza");
+    expect(res.companies.some((c) => c.properties.name?.includes("Mazza"))).toBe(true);
+    expect(res.deals.length).toBeGreaterThan(0);
+    const empty = await api.globalSearch("x");
+    expect(empty.companies).toEqual([]);
+  });
+
   it("lists active owners as users", async () => {
     const owners = await api.listOwners();
     expect(owners.length).toBeGreaterThan(10);

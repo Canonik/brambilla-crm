@@ -9,6 +9,7 @@ import { USING_MOCKS } from "@/api/transport";
 import { Avatar } from "@/components/ui/Avatar";
 import { NativeSelect } from "@/components/ui/Input";
 import { cn } from "@/lib/cn";
+import { GlobalSearch } from "./GlobalSearch";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
@@ -101,8 +102,9 @@ export function AppShell() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-line bg-surface py-3 md:flex">
+      <aside className="hidden w-60 shrink-0 flex-col gap-3 border-r border-line bg-surface py-3 md:flex">
         <Wordmark />
+        <GlobalSearch />
         {nav}
         {footer}
       </aside>
@@ -120,7 +122,8 @@ export function AppShell() {
         </div>
       </div>
       {mobileOpen ? (
-        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-4 bg-surface py-3 md:hidden">
+        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-3 bg-surface py-3 md:hidden">
+          <GlobalSearch onNavigate={() => setMobileOpen(false)} />
           {nav}
           {footer}
         </div>

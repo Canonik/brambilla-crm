@@ -298,6 +298,18 @@ export async function mockRequest<T>(path: string, opts: RequestOptions = {}): P
     } as T;
   }
 
+  if ((m = pathname.match(/^\/crm\/v4\/associations\/([a-z_]+)\/([a-z_]+)\/batch\/read$/)) && method === "POST") {
+    const [, from, to] = m;
+    const body = opts.body as { inputs: Array<{ id: string }> };
+    return {
+      status: "COMPLETE",
+      results: body.inputs.map((i) => ({
+        from: { id: String(i.id) },
+        to: Array.from(d.assoc[from as Collection]?.[String(i.id)]?.[to as Collection] ?? []).map((toObjectId) => ({ toObjectId, associationTypes: [] })),
+      })),
+    } as T;
+  }
+
   if ((m = pathname.match(/^\/crm\/v4\/objects\/([a-z_]+)\/([^/]+)\/associations\/([a-z_]+)$/))) {
     const [, type, id, to] = m;
     const ids = Array.from(d.assoc[type as Collection]?.[id!]?.[to as Collection] ?? []);
