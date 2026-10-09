@@ -8,7 +8,7 @@ from ..store import Store, record_out
 from ..util import iso, utcnow
 from .common import csv_list, int_limit, json_body, object_type_or_404
 
-router = APIRouter(prefix="/crm/v3/objects")
+router = APIRouter()
 
 
 def _bool(v: str | None) -> bool:

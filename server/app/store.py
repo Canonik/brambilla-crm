@@ -64,6 +64,13 @@ class Store:
             _defs_cache[object_type] = d
         return d
 
+    def readable_properties(self, object_type: str, properties: list[str] | None) -> list[str] | None:
+        """Ignore undefined requested properties, matching HubSpot read semantics."""
+        if properties is None:
+            return None
+        definitions = self.prop_defs(object_type)
+        return [name for name in properties if name in definitions]
+
     def pipelines(self, object_type: str) -> list[dict]:
         with _cache_lock:
             p = _pipeline_cache.get(object_type)
@@ -349,7 +356,7 @@ class Store:
         row = self._row(object_type, id_, include_archived=include_archived)
         if row is None:
             raise not_found(f"No {defaults.OBJECT_TYPES[object_type]['singular']} with ID {id_value} exists")
-        out = record_out(row, properties, object_type)
+        out = record_out(row, self.readable_properties(object_type, properties), object_type)
         if associations:
             out["associations"] = self.associations_block(id_, associations)
         return out
@@ -701,7 +708,8 @@ class Store:
         rows = self.conn.execute(sql, params).fetchall()
         more = len(rows) > limit
         rows = rows[:limit]
-        results = [record_out(r, properties, object_type) for r in rows]
+        readable = self.readable_properties(object_type, properties)
+        results = [record_out(r, readable, object_type) for r in rows]
         if associations:
             for r, row in zip(results, rows):
                 r["associations"] = self.associations_block(row["id"], associations)

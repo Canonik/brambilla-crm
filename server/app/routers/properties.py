@@ -9,7 +9,7 @@ from ..store import invalidate_caches
 from ..util import now_iso
 from .common import json_body, object_type_or_404
 
-router = APIRouter(prefix="/crm/v3/properties")
+router = APIRouter()
 
 VALID_TYPES = {"string", "number", "date", "datetime", "enumeration", "bool"}
 VALID_FIELD_TYPES = {"text", "textarea", "number", "date", "select", "radio", "checkbox", "booleancheckbox", "file", "calculation_equation", "html", "phonenumber"}
