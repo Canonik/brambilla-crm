@@ -99,3 +99,4 @@ tickets with a dead contact reference use the `Da:` line.
 - 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
 - 13:17 Release 3 pushed (78feee0); Railway success 13:18; authenticated production checks pass; tagged `hackitaly-good-002`.
 - 13:19 Merging agent/backend-reliability 9e716c7 for release 4; full check running.
+- 13:20 Production migration timing read from /__stats: the 13:10 organizer form check migrated the sample export in 30.9 s on Railway (build 17.3, copy 5.8, indexes 4.9); 538,354 records, 1,666,162 associations, 936 dormant, classes A 52 B 25 C 65, identical to the oracle.
