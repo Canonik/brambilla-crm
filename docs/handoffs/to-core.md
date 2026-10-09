@@ -47,3 +47,14 @@ repaired; two addresses in one field split into `email` + `hs_additional_emails`
 in the email field moves to `phone` when empty; contacts also merge by same first+last name
 inside the same company when that does not join two different valid emails. The reference
 oracle in `tests/reference` is being updated to the same rules.
+
+## 11:25, from the UI handoff (merged agent/ui 5ce3208)
+
+- Search must accept association pseudo-properties in filters: `associations.contact`,
+  `associations.company`, `associations.deal` with operator `IN` (list of ids), like HubSpot.
+- UI calls: GET objects by id with `properties` and `associations` params, `POST .../search`
+  with `sorts`, `query`, `limit`, `after`, `total`; `POST .../batch/read`; `PATCH` by id;
+  `POST /crm/v3/objects/notes` with inline associations; `GET /crm/v3/pipelines/{deals,tickets}`;
+  `GET /crm/v3/lists/object-type-id/0-2/name/Clienti%20dormienti` (URL-encoded name) and
+  `GET /crm/v3/lists/{listId}/memberships`; `GET /crm/v4/objects/{type}/{id}/associations/{to}`.
+- Auth scheme simplified: Bearer header only, no cookie login endpoint needed.

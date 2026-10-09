@@ -53,14 +53,14 @@ Local Postgres for everyone: `docker run -d --name brambilla-pg -e POSTGRES_PASS
 ## 2. Authentication
 
 - Every request needs `Authorization: Bearer <CRM_TOKEN>`, except `GET /health`, the export
-  download links (`GET /exports/{id}/{file}`), the SPA static files and UI routes, and
-  `POST /ui/login`.
+  download links (`GET /exports/...` as returned in an export's `result`), the SPA static files
+  and the UI routes of section 6 (they return HTML, no data).
 - Missing or wrong token: `401` with the HubSpot error envelope, `category: "INVALID_AUTHENTICATION"`.
-- UI session: `POST /ui/login` body `{"token": "..."}` accepts `CRM_TOKEN` or `UI_PASSWORD`,
-  sets an HttpOnly cookie `crm_session` (opaque, server-side signed value), returns `204`.
-  `POST /ui/logout` clears it. `GET /ui/me` returns `200 {"user": "ui"}` or `401`.
-  The API middleware accepts either the bearer header or a valid `crm_session` cookie, so the
-  SPA calls the very same `/crm/...` endpoints the tests call, with `credentials: "include"`.
+- Browser: the SPA shows a one-time sign-in screen, keeps the token in `localStorage` and sends
+  it as `Authorization: Bearer` on every call, so the UI uses the very same endpoints the tests
+  call. The token is never baked into the bundle at build time (the repo and the served JS are
+  public): no `VITE_CRM_TOKEN` in production builds. No cookie session, no `/ui/login` (decided
+  11:25, replaces the earlier cookie scheme).
 
 ## 3. Organizer endpoints (exact contracts in BRIEF.md)
 
@@ -151,7 +151,7 @@ Core documents the implemented list in `server/API_FOR_UI.md`; the UI uses one t
 
 ## 6. UI routes (SPA) and `/health.ui`
 
-| Module | Route | Page |
+| Module (`/health.ui` key) | Route | Page |
 |---|---|---|
 | companies | `/companies`, `/companies/:id` | list with search; company page with revenue 2025, class, VAT, domains, contacts, deals, tickets, timeline |
 | contacts | `/contacts`, `/contacts/:id` | list with search, contact page |
@@ -204,3 +204,14 @@ the UI stage falls back to a placeholder page so the API keeps scoring.
   `/ui/api/...` endpoints with `credentials: "include"`. Keep the mock router for tests only.
 - **Both**: commit on your branch at every working milestone; the coordinator merges `main`
   from the branches, not from worktrees.
+
+## 10. Coordinator notes, 11:25
+
+- Search filters on associations: the UI filters with pseudo-properties
+  `associations.contact`, `associations.company`, `associations.deal` and operator `IN`
+  (HubSpot search supports them). Core must support these in `POST /crm/v3/objects/{type}/search`.
+- `/health.ui` keys stay `companies, contacts, deals, tickets, lists, assistant`; `lists`
+  maps to `/dormant`.
+- Backend dev port is 8000 (`uvicorn app.main:app --port 8000` from `server/`); set
+  `VITE_DEV_PROXY_TARGET=http://127.0.0.1:8000` for the Vite proxy. Production image serves
+  `frontend/dist` from `/app/frontend/dist`.
