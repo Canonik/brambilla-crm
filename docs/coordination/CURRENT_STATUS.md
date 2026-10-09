@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 12:55 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:00 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -68,9 +68,27 @@ Gaps nobody owned before 12:50, now assigned: real-model end-to-end assistant te
 (Coordinator, needs token and explicit authorization since it spends model budget); production restart
 and 20-reader latency measurement (Agent 3 locally, Coordinator on Railway after token).
 
+## Open defects (ranked by points at stake, from the 12:57 audit reconciliation)
+
+| # | Defect | Area | Status on a6e39d4 | Owner | Due |
+|---|---|---|---|---|---|
+| 1 | Dated `2026-09` URL families missing for pipelines, lists, owners, imports, exports, association batches and record associations (only objects and properties aliased). `tests/acceptance/test_dated_routes.py`: 5 of 7 fail. The organizer form check uses dated URLs. | conformity 10, possibly R9 reads | OPEN | Agent 3 | 13:25 |
+| 2 | `/__agente` catch-all claims no changes even when earlier tool calls committed; choice-level model errors ignored | R13 quality | OPEN | Agent 2 | 13:20 |
+| 3 | Export create 200 instead of 202; VIEW export ignores `filterGroups` and sorts | conformity | OPEN | Agent 3 | after 1 |
+| 4 | `Infinity` raises, `NaN` stored; `fmt_money` HALF_EVEN vs migration HALF_UP; line item without quantity gets no `amount` (patch 03 on agent/backend-audit) | conformity, R13 maths | OPEN | Agent 3 | after 1 |
+| 5 | `hasUniqueValue` not enforced for API-created custom properties (R7 itself safe via index) | conformity | OPEN | Agent 3 | after 1 |
+| 6 | `recordIdsAdded` spelling (docs: `recordsIdsAdded`); import response lacks `mappedObjectTypeIds` | conformity | OPEN | Agent 3 | after 1 |
+| 7 | Ticket `Da:` fallback does not look at `hs_additional_emails` (patch 0002 on agent/score-optimization) | R5 hedge | OPEN | Agent 2 | with first commit |
+| 8 | Empty pipeline with `r1..r4` stage maps to Rinnovi while RICHIESTE says no pipeline means Vendite; zero rows in sample | R3, choice sheet | UNCLEAR, documented | Coordinator | choice sheet |
+
+Fixed since the audits (verified in code on a6e39d4): restart metadata loss (77c1f22), CSV delimiter hard-coded to `;`,
+assistant pipeline and stage targeting plus rollback ledger (75d0043), search hardening and local calendar date (046b7f8),
+tickets with a dead contact reference use the `Da:` line.
+
 ## Log
 
 - 12:45 Coordinator takeover. `origin/main` 75d0043 deployed; local `main` 04c3c32 diverged.
 - 12:51 Merge of 75d0043 into main (conflict in `run_tool` resolved keeping writes rollback and observer): a6e39d4.
 - 12:52 Pushed a6e39d4; Railway success 12:53; health, SPA and 401 verified.
 - 12:55 Migration and rules suites 32 passed on a6e39d4; tagged `hackitaly-good-001`.
+- 12:59 Dated-route acceptance test added (ca79381): 5 of 7 families fail; assigned to Agent 3 as P0.
