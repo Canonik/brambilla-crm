@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 13:26 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:30 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -14,6 +14,8 @@ Workers never edit this file. Each worker keeps its own file in this directory o
 | 75d0043 | 12:32 | success | /health 200, SPA served, 401 without token | previous release, no authenticated checks run by the current coordinator |
 | a6e39d4 | 12:52 | success 12:53 | /health 200, SPA bundle hash matches local build, 401 without token | `hackitaly-good-001` (authenticated production checks still pending the token) |
 | 78feee0 | 13:17 | success 13:18 | authenticated read-only check 13:18: stats, legacy and dated reads, search totals equal to the oracle, pipelines, dormant list, owners, properties, labels, SPA routes; 40 parallel reads p95 0.24 s | `hackitaly-good-002`: assistant CSV tools, insights inspector, new UI; local unit 196, acceptance 65, vitest 60 |
+| 6f375a8 | 13:28 | success 13:29 | authenticated check 13:29 all 200, p95 0.17 s | `hackitaly-good-005`: conformity sweep (0 deviations on 152 dated calls); unit 234, form+conformity+dated 33, migration untouched |
+| 92c35e8 | 13:26 | success 13:26 | bundle hash matches | `hackitaly-good-004`: dormant list all pages, board keyboard drag; vitest 60 |
 | 5bb299e | 13:23 | success 13:25 | authenticated read-only check 13:25 all 200, export create 202, 40 parallel reads p95 0.32 s; local unit 227, acceptance 65 | release 4 candidate: exports 202 and filters, numeric validation, unique custom properties, closedate on close, list and import shapes, concurrency tests; push after the live assistant smoke finishes |
 | 2694c78 | 13:07 | success 13:08 | /health 200, bundle unchanged, 401 without token | dated route families, 4xx on malformed input, rate limit 50000/10 s; local: unit 176, form+conformity+dated 33, migration+rules 32 |
 
@@ -21,7 +23,7 @@ Local evidence on a6e39d4 (server on 127.0.0.1:8040, database `brambilla_release
 `server/tests` 26 passed; `tests/acceptance/test_form_check.py` + `test_api_conformity.py` 26 passed;
 `test_migration.py` + `test_rules_behavior.py` 32 passed (migration 26.9 s locally); `npm ci && npm run build` exit 0.
 
-Known-good tags: `hackitaly-good-001` = a6e39d4, `hackitaly-good-002` = 78feee0, `hackitaly-good-003` = 5bb299e. Convention `hackitaly-good-NNN` on `main`.
+Known-good tags: `hackitaly-good-001` = a6e39d4, `hackitaly-good-002` = 78feee0, `hackitaly-good-003` = 5bb299e, `hackitaly-good-004` = 92c35e8, `hackitaly-good-005` = 6f375a8 (current production). Convention `hackitaly-good-NNN` on `main`.
 
 Credentials: `~/.brambilla-secrets.env` holds `CRM_TOKEN` and `OPENROUTER_API_KEY` since 13:18 (never committed). Railway CLI stays logged out (GitHub 2FA failed); deploy status comes from the GitHub commit status and the bundle hash.
 
@@ -100,5 +102,6 @@ tickets with a dead contact reference use the `Da:` line.
 - 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
 - 13:17 Release 3 pushed (78feee0); Railway success 13:18; authenticated production checks pass; tagged `hackitaly-good-002`.
 - 13:19 Merging agent/backend-reliability 9e716c7 for release 4; full check running.
+- 13:23 to 13:29 Releases 4, 5, 6 pushed and verified (5bb299e, 92c35e8, 6f375a8). All five worker sessions told to go idle to save tokens.
 - 13:21 Human authorized the live assistant smoke on production and release 4. Smoke on release 3: 0 failed checks (scenario 3 revenue skipped, company lookup by the runner). Release 4 pushed 13:23.
 - 13:20 Production migration timing read from /__stats: the 13:10 organizer form check migrated the sample export in 30.9 s on Railway (build 17.3, copy 5.8, indexes 4.9); 538,354 records, 1,666,162 associations, 936 dormant, classes A 52 B 25 C 65, identical to the oracle.
