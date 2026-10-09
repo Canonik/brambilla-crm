@@ -202,7 +202,7 @@ def handle_conversation(body: dict, *, include_trace: bool = False) -> str | tup
     observer = EvidenceTrace(include_trace)
 
     def finish(reply: str):
-        return (reply, observer.snapshot()) if include_trace else reply
+        return (reply, observer.snapshot(reply)) if include_trace else reply
 
     if len(msgs) == 1:
         return finish("Ciao! Dimmi cosa ti serve dal CRM: posso cercare aziende, contatti, trattative e ticket, aggiornarli o rispondere a domande sui dati.")
