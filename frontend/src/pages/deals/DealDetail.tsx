@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Check, MessageSquareText } from "lucide-react";
 import { useActivities, useDealPage, useMoveDeal, usePipelines } from "@/api/hooks";
@@ -32,6 +32,19 @@ export function DealDetail() {
   const activities = useActivities(`deal:${id}`, targets, page.isSuccess);
   const pipeline = pipelines.data?.find((p) => p.id === (page.data?.deal.properties.pipeline || "default"));
   const move = useMoveDeal(pipeline);
+  // The CRM opens the supply kickoff ticket (R10) and the callback task (R11)
+  // asynchronously after a stage change; poll briefly so they show up.
+  const timers = useRef<number[]>([]);
+  const scheduleRefetch = () => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [1500, 4000, 9000].map((ms) =>
+      window.setTimeout(() => {
+        void page.refetch();
+        void activities.refetch();
+      }, ms),
+    );
+  };
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
   if (page.isPending) {
     return (
@@ -66,6 +79,7 @@ export function DealDetail() {
     try {
       await move.mutateAsync({ deal, toStage });
       toast.success(`Moved to ${displayStageLabel(pipeline?.stages.find((s) => s.id === toStage))}`);
+      scheduleRefetch();
     } catch (err) {
       toast.error("Could not change the stage", err instanceof Error ? err.message : undefined);
     }
@@ -245,9 +259,11 @@ export function DealDetail() {
                 <ul className="divide-y divide-line">
                   {tickets.map((t) => {
                     const ts = ticketPipelines.data?.flatMap((pl) => pl.stages).find((s) => s.id === t.properties.hs_pipeline_stage);
+                    const automatic = (t.properties.subject ?? "").startsWith("Avvio fornitura - ");
                     return (
                       <li key={t.id} className="px-2 py-2">
                         <RecordLink to={`/tickets/${t.id}`} className="block truncate text-[13px]">{t.properties.subject}</RecordLink>
+                        {automatic ? <div className="mt-0.5 text-[11.5px] text-good">Opened by the CRM when the deal was won</div> : null}
                         <div className="mt-1 flex items-center gap-1.5">
                           <TicketStageBadge stage={ts} stageId={t.properties.hs_pipeline_stage} size="sm" />
                           <PriorityBadge value={t.properties.hs_ticket_priority} size="sm" />

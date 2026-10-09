@@ -7,7 +7,8 @@ import { TooltipProvider } from "@/components/ui/Tooltip";
 import { CurrentUserProvider } from "@/app/currentUser";
 import { AssistantProvider } from "@/assistant/AssistantContext";
 import { TokenGate } from "@/auth/TokenGate";
-import { Dashboard } from "@/pages/Dashboard";
+import { MotionProvider } from "@/components/motion/primitives";
+import { Home } from "@/pages/Home";
 import { CompaniesList } from "@/pages/companies/CompaniesList";
 import { CompanyDetail } from "@/pages/companies/CompanyDetail";
 import { ContactsList } from "@/pages/contacts/ContactsList";
@@ -41,10 +42,11 @@ export default function App() {
           <CurrentUserProvider>
             <TokenGate>
               <BrowserRouter>
+                <MotionProvider>
                 <AssistantProvider>
                   <Routes>
                     <Route element={<AppShell />}>
-                      <Route index element={<Dashboard />} />
+                      <Route index element={<Home />} />
                       <Route path="companies" element={<CompaniesList />} />
                       <Route path="companies/:id" element={<CompanyDetail />} />
                       <Route path="contacts" element={<ContactsList />} />
@@ -60,6 +62,7 @@ export default function App() {
                     </Route>
                   </Routes>
                 </AssistantProvider>
+                </MotionProvider>
               </BrowserRouter>
             </TokenGate>
           </CurrentUserProvider>

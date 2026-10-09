@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Building2, Kanban, LayoutDashboard, LifeBuoy, Menu, MessageSquareText, Moon, Users, X } from "lucide-react";
+import { motion } from "motion/react";
+import { Building2, Kanban, LayoutDashboard, LifeBuoy, Menu, MessageSquareText, Moon, Search, Users, X } from "lucide-react";
 import { useAssistant } from "@/assistant/AssistantContext";
 import { AssistantDrawer } from "@/assistant/AssistantDrawer";
-import { AssistantMark } from "@/assistant/AssistantChat";
+import { AssistantMark } from "@/assistant/AssistantMark";
 import { useCurrentUser } from "@/app/currentUser";
 import { USING_MOCKS } from "@/api/transport";
 import { Avatar } from "@/components/ui/Avatar";
+import { Kbd } from "@/components/ui/Button";
 import { NativeSelect } from "@/components/ui/Input";
+import { PageTransition, SPRING } from "@/components/motion/primitives";
 import { cn } from "@/lib/cn";
+import { CommandPalette, PaletteTrigger } from "./CommandPalette";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
+  { to: "/", label: "Home", icon: LayoutDashboard, end: true },
   { to: "/companies", label: "Companies", icon: Building2 },
   { to: "/contacts", label: "Contacts", icon: Users },
   { to: "/deals", label: "Deals", icon: Kanban },
@@ -20,12 +24,13 @@ const NAV = [
   { to: "/assistant", label: "Assistant", icon: MessageSquareText },
 ];
 
+/** Routes that render the conversation inline, so the side panel stays shut there. */
+export const INLINE_ASSISTANT_ROUTES = new Set(["/", "/assistant"]);
+
 function Wordmark() {
   return (
     <div className="flex items-center gap-2.5 px-3">
-      <span className="inline-flex size-7 items-center justify-center rounded-md bg-gentian font-wide text-[15px] font-bold text-white">
-        B
-      </span>
+      <span className="inline-flex size-7 items-center justify-center rounded-md bg-gentian font-wide text-[15px] font-bold text-white">B</span>
       <div className="leading-tight">
         <div className="font-wide text-[14px] font-semibold tracking-tight text-ink">Brambilla</div>
         <div className="text-[11px] text-ink-3">Forniture CRM</div>
@@ -34,17 +39,8 @@ function Wordmark() {
   );
 }
 
-export function AppShell() {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const location = useLocation();
-  const assistant = useAssistant();
-  const { user, users, setUser } = useCurrentUser();
-
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [location.pathname]);
-
-  const nav = (
+function Nav({ layoutId }: { layoutId: string }) {
+  return (
     <nav className="flex flex-1 flex-col gap-0.5 px-2" aria-label="Main">
       {NAV.map((item) => (
         <NavLink
@@ -53,33 +49,78 @@ export function AppShell() {
           end={item.end}
           className={({ isActive }) =>
             cn(
-              "flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium transition-colors",
-              isActive ? "bg-gentian-soft text-gentian" : "text-ink-2 hover:bg-surface-3 hover:text-ink",
+              "relative flex h-8 items-center gap-2.5 rounded-md px-2 text-[13px] font-medium transition-colors",
+              isActive ? "text-gentian" : "text-ink-2 hover:bg-surface-3 hover:text-ink",
             )
           }
         >
-          <item.icon className="size-4 shrink-0" aria-hidden />
-          <span className="truncate">{item.label}</span>
+          {({ isActive }) => (
+            <>
+              {isActive ? <motion.span layoutId={layoutId} className="absolute inset-0 rounded-md bg-gentian-soft" transition={SPRING} aria-hidden /> : null}
+              <item.icon className="relative size-4 shrink-0" aria-hidden />
+              <span className="relative truncate">{item.label}</span>
+            </>
+          )}
         </NavLink>
       ))}
     </nav>
   );
+}
+
+export function AppShell() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const location = useLocation();
+  const assistant = useAssistant();
+  const { user, users, setUser } = useCurrentUser();
+  const inline = INLINE_ASSISTANT_ROUTES.has(location.pathname);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Cmd/Ctrl+K opens the palette; Cmd/Ctrl+J talks to the assistant.
+  const toggleAssistant = assistant.toggle;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (key === "j") {
+        e.preventDefault();
+        const composer = document.querySelector<HTMLTextAreaElement>("textarea[data-composer]");
+        if (INLINE_ASSISTANT_ROUTES.has(window.location.pathname) && composer) composer.focus();
+        else toggleAssistant();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleAssistant]);
+
+  const askButton = (
+    <button
+      type="button"
+      onClick={() => {
+        if (inline) document.querySelector<HTMLTextAreaElement>("textarea[data-composer]")?.focus();
+        else assistant.toggle();
+      }}
+      className={cn(
+        "group flex h-10 items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-semibold transition-colors",
+        assistant.open && !inline ? "bg-gentian-deep text-white" : "bg-gentian text-white hover:bg-gentian-deep",
+      )}
+      aria-pressed={assistant.open && !inline}
+    >
+      <AssistantMark size={20} className="bg-white/15 ring-1 ring-white/20" />
+      <span className="truncate">Ask the CRM</span>
+      <span className="ml-auto text-[11px] font-normal text-white/60">⌘J</span>
+    </button>
+  );
 
   const footer = (
     <div className="mt-auto flex flex-col gap-2 border-t border-line px-2 pt-3">
-      <button
-        type="button"
-        onClick={assistant.toggle}
-        className={cn(
-          "flex h-9 items-center gap-2.5 rounded-md border px-2 text-left text-[13px] font-medium transition-colors",
-          assistant.open ? "border-gentian-line bg-gentian-soft text-gentian" : "border-line bg-surface text-ink hover:border-gentian-line hover:bg-gentian-soft/50",
-        )}
-        aria-pressed={assistant.open}
-      >
-        <AssistantMark size={18} />
-        <span className="truncate">Ask the CRM</span>
-        <span className="ml-auto text-[11px] font-normal text-ink-3">Esc</span>
-      </button>
+      {askButton}
       <label className="flex items-center gap-2 rounded-md px-1 py-1">
         <Avatar name={user.name} size="sm" />
         <span className="sr-only">Working as</span>
@@ -101,27 +142,33 @@ export function AppShell() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="hidden w-56 shrink-0 flex-col gap-4 border-r border-line bg-surface py-3 md:flex">
+      <aside className="hidden w-60 shrink-0 flex-col gap-3 border-r border-line bg-surface py-3 md:flex">
         <Wordmark />
-        {nav}
+        <div className="px-2">
+          <PaletteTrigger onOpen={() => setPaletteOpen(true)} />
+        </div>
+        <Nav layoutId="nav-active-desktop" />
         {footer}
       </aside>
 
       {/* Mobile top bar */}
       <div className="fixed inset-x-0 top-0 z-20 flex h-12 items-center justify-between border-b border-line bg-surface px-2 md:hidden">
         <Wordmark />
-        <div className="flex items-center gap-1">
-          <button type="button" aria-label="Ask the CRM" onClick={assistant.toggle} className="rounded-md p-2 hover:bg-surface-3">
-            <AssistantMark size={18} />
+        <div className="flex items-center gap-0.5">
+          <button type="button" aria-label="Search or ask" onClick={() => setPaletteOpen(true)} className="rounded-md p-2 text-ink-2 hover:bg-surface-3">
+            <Search className="size-5" />
           </button>
-          <button type="button" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen((o) => !o)} className="rounded-md p-2 hover:bg-surface-3">
+          <button type="button" aria-label="Ask the CRM" onClick={() => (inline ? document.querySelector<HTMLTextAreaElement>("textarea[data-composer]")?.focus() : assistant.toggle())} className="rounded-md p-2 hover:bg-surface-3">
+            <AssistantMark size={20} />
+          </button>
+          <button type="button" aria-label={mobileOpen ? "Close menu" : "Open menu"} aria-expanded={mobileOpen} onClick={() => setMobileOpen((o) => !o)} className="rounded-md p-2 hover:bg-surface-3">
             {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
           </button>
         </div>
       </div>
       {mobileOpen ? (
-        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-4 bg-surface py-3 md:hidden">
-          {nav}
+        <div className="fixed inset-0 top-12 z-20 flex flex-col gap-3 bg-surface py-3 md:hidden">
+          <Nav layoutId="nav-active-mobile" />
           {footer}
         </div>
       ) : null}
@@ -129,12 +176,16 @@ export function AppShell() {
       <main
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto scroll-quiet pt-12 transition-[margin] duration-200 md:pt-0",
-          assistant.open && "xl:mr-[440px]",
+          assistant.open && !inline && "xl:mr-[440px]",
         )}
       >
-        <Outlet />
+        <PageTransition>
+          <Outlet />
+        </PageTransition>
       </main>
       <AssistantDrawer />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <span className="sr-only">Press {"⌘"}K to search, {"⌘"}J to ask the assistant. <Kbd>Esc</Kbd> closes.</span>
     </div>
   );
 }

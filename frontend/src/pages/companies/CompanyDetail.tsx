@@ -309,7 +309,7 @@ export function CompanyDetail() {
                   { label: "Phone", value: p.phone },
                   { label: "Notes", value: p.description },
                   { label: "Legacy id", value: p.id_legacy ? <span className="tnum">{p.id_legacy}</span> : null },
-                  { label: "Created", value: <DateText value={p.createdate ?? company.createdAt} /> },
+                  { label: "In CRM since", value: <DateText value={p.createdate ?? company.createdAt} /> },
                   { label: "Updated", value: <DateText value={p.hs_lastmodifieddate ?? company.updatedAt} withTime /> },
                 ]}
               />

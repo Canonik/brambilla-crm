@@ -29,7 +29,7 @@ The backend serves `frontend/dist` as static files with an SPA fallback (every u
 
 | Route | Screen |
 |---|---|
-| `/` | Dashboard |
+| `/` | Home: the assistant workspace (composer, grounded prompts, CRM pulse); a started conversation replaces the hero in place |
 | `/companies`, `/companies/:id` | Companies list, company page (revenue 2025, class, contacts, deals, tickets, history) |
 | `/contacts`, `/contacts/:id` | Contacts |
 | `/deals`, `/deals/:id` | Deals board (kanban per pipeline, drag to change stage), deal page |
@@ -42,6 +42,13 @@ The backend serves `frontend/dist` as static files with an SPA fallback (every u
 ```json
 {"companies": "/companies", "contacts": "/contacts", "deals": "/deals", "tickets": "/tickets", "lists": "/dormant", "assistant": "/assistant"}
 ```
+
+## Keyboard and assistant surfaces
+
+- `Cmd/Ctrl+K`: command palette (pages, companies, contacts, deals; three letters or more can be sent to the assistant as a question).
+- `Cmd/Ctrl+J`: focus the composer on `/` and `/assistant`, open the side panel everywhere else. `Esc` closes the panel.
+- The evidence switch ("Show evidence") defaults to on; only the boolean is kept in `localStorage` (`brambilla.crm.assistant.evidence`), the evidence itself is never stored. When on, replies show up to three record cards (names fetched with `batch/read`) and a receipt for committed writes, above Agent 4's inspector.
+- Motion comes from `motion` (`motion/react`), wrapped in `MotionConfig reducedMotion="user"`; primitives live in `src/components/motion/primitives.tsx`.
 
 ## Authentication from the browser
 

@@ -14,9 +14,9 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
-import { Kanban } from "lucide-react";
-import { keys, useDealsInStage, useMoveDeal, usePipelines } from "@/api/hooks";
-import type { Deal, Paged, Pipeline, Stage } from "@/api/types";
+import { CircleCheck, CircleX, Kanban } from "lucide-react";
+import { keys, useDealCompanies, useDealsInStage, useMoveDeal, usePipelines } from "@/api/hooks";
+import type { Company, Deal, Paged, Pipeline, Stage } from "@/api/types";
 import { useCurrentUser } from "@/app/currentUser";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -56,7 +56,7 @@ export function DealsBoard() {
   const onDragEnd = async (e: DragEndEvent) => {
     setActive(null);
     const deal = (e.active.data.current as { deal: Deal } | undefined)?.deal;
-    const toStage = e.over?.id ? String(e.over.id) : null;
+    const toStage = e.over?.id ? String(e.over.id).replace(/^bar:/, "") : null;
     if (!deal || !toStage || !pipeline) return;
     const fromStage = deal.properties.dealstage ?? "";
     if (toStage === fromStage) return;
@@ -140,14 +140,48 @@ export function DealsBoard() {
         <EmptyState icon={<Kanban />} title="No pipelines yet" description="Pipelines are created by the reset and the migration." />
       ) : (
         <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
-          <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto scroll-quiet p-4">
-            {pipeline.stages.map((stage) => (
-              <Column key={stage.id} pipeline={pipeline} stage={stage} owner={mine ? user.email : undefined} />
-            ))}
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto scroll-quiet p-4" data-board>
+              {pipeline.stages.map((stage) => (
+                <Column key={stage.id} pipeline={pipeline} stage={stage} owner={mine ? user.email : undefined} />
+              ))}
+            </div>
+            {active ? <ClosedStageBar stages={pipeline.stages.filter((s) => isWonStage(s) || isLostStage(s))} current={active.properties.dealstage ?? ""} /> : null}
           </div>
           <DragOverlay dropAnimation={null}>{active ? <DealCard deal={active} overlay /> : null}</DragOverlay>
         </DndContext>
       )}
+    </div>
+  );
+}
+
+/** While a card is being dragged, Won and Lost are one drop away even when
+ *  their columns are scrolled out of view. */
+function ClosedStageBar({ stages, current }: { stages: Stage[]; current: string }) {
+  if (stages.length === 0) return null;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex justify-center gap-3 p-4">
+      {stages.map((s) => (
+        <BarTarget key={s.id} stage={s} disabled={s.id === current} />
+      ))}
+    </div>
+  );
+}
+
+function BarTarget({ stage, disabled }: { stage: Stage; disabled: boolean }) {
+  const won = isWonStage(stage);
+  const { isOver, setNodeRef } = useDroppable({ id: `bar:${stage.id}`, disabled });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "pointer-events-auto flex h-14 w-64 items-center justify-center gap-2 rounded-lg border-2 border-dashed bg-surface/95 text-[13px] font-medium shadow-pop backdrop-blur transition-colors",
+        disabled && "opacity-40",
+        isOver ? (won ? "border-good bg-good-soft text-good" : "border-ink-2 bg-surface-3 text-ink") : won ? "border-good/50 text-good" : "border-line-strong text-ink-2",
+      )}
+    >
+      {won ? <CircleCheck className="size-4" aria-hidden /> : <CircleX className="size-4" aria-hidden />}
+      Drop to mark {displayStageLabel(stage).toLowerCase()}
     </div>
   );
 }
@@ -157,6 +191,7 @@ function Column({ pipeline, stage, owner }: { pipeline: Pipeline; stage: Stage; 
   const { isOver, setNodeRef } = useDroppable({ id: stage.id });
   const all = query.data?.pages.flatMap((p) => p.results) ?? [];
   const deals = owner ? all.filter((d) => d.properties.commerciale === owner) : all;
+  const companies = useDealCompanies(all.map((d) => d.id));
   const total = query.data?.pages[0]?.total;
   const sum = useMemo(() => sumEur(deals.map((d) => ({ amount: d.properties.amount, currency: d.properties.deal_currency_code }))), [deals]);
   const won = isWonStage(stage);
@@ -199,7 +234,7 @@ function Column({ pipeline, stage, owner }: { pipeline: Pipeline; stage: Stage; 
             {owner ? "None of your deals here" : "No deals in this stage"}
           </div>
         ) : (
-          deals.map((d) => <DealCard key={d.id} deal={d} />)
+          deals.map((d) => <DealCard key={d.id} deal={d} company={companies.data?.[d.id]} />)
         )}
         {query.hasNextPage && !owner ? (
           <Button variant="ghost" size="sm" className="w-full" loading={query.isFetchingNextPage} onClick={() => query.fetchNextPage()}>
@@ -211,7 +246,7 @@ function Column({ pipeline, stage, owner }: { pipeline: Pipeline; stage: Stage; 
   );
 }
 
-function DealCard({ deal, overlay }: { deal: Deal; overlay?: boolean }) {
+function DealCard({ deal, overlay, company }: { deal: Deal; overlay?: boolean; company?: Company }) {
   const navigate = useNavigate();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: deal.id, data: { deal }, disabled: overlay });
   const p = deal.properties;
@@ -234,6 +269,7 @@ function DealCard({ deal, overlay }: { deal: Deal; overlay?: boolean }) {
       aria-roledescription="draggable deal"
     >
       <div className="line-clamp-2 text-[13px] font-medium leading-snug text-ink">{p.dealname || "Untitled deal"}</div>
+      {company ? <div className="mt-0.5 truncate text-[12px] text-ink-3">{company.properties.name}</div> : null}
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <Money amount={p.amount} currency={p.deal_currency_code} className="text-[13px] font-semibold" />
         <DateText value={p.closedate} className="text-[12px] text-ink-3" />

@@ -77,6 +77,26 @@ export function useDealPage(id: string | undefined) {
   return useQuery({ queryKey: keys.deal(id ?? ""), queryFn: () => api.getDealPage(id!), enabled: Boolean(id) });
 }
 
+export function useDealCompanies(dealIds: string[]) {
+  const key = dealIds.slice().sort().join(",");
+  return useQuery({
+    queryKey: ["deal-companies", key],
+    queryFn: () => api.dealCompanies(dealIds),
+    enabled: dealIds.length > 0,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useGlobalSearch(query: string) {
+  return useQuery({
+    queryKey: ["global-search", query],
+    queryFn: () => api.globalSearch(query),
+    enabled: query.trim().length >= 2,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useMoveDeal(pipeline: Pipeline | undefined) {
   const qc = useQueryClient();
   return useMutation({
