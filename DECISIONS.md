@@ -22,14 +22,14 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 
 ### 0.2 References to rows that are not imported
 - Deal `id_azienda` pointing to a deleted company (0 missing, some deleted), deal `contatti` pointing to missing contacts (737 refs), contact `id_azienda` missing (1,754) or deleted (1,881), ticket `id_contatto` missing (23) or deleted (691), ticket `id_azienda` deleted (596), activity `id_contatto` missing (3,665) or deleted (13,099), activity `id_opportunita` deleted (7,494), quote lines of deleted deals (1,722).
-- **Rule**: such a reference is an empty field. The record is imported anyway, without that association. When duplicates are merged, an empty-by-reference field is empty, so the most recent row that holds a *valid* reference wins. A reference to a row merged into another goes to the surviving record. Status: decided.
+- **Rule** (counts corrected 11:30: deals also hold 1,679 refs to deleted contacts, 2,416 dropped refs in all; 17,656 live activities end with no association once dangling refs are dropped): such a reference is an empty field. The record is imported anyway, without that association. When duplicates are merged, an empty-by-reference field is empty, so the most recent row that holds a *valid* reference wins. A reference to a row merged into another goes to the surviving record. Status: decided.
 
 ### 0.3 Whitespace
 - Names, titles, cities, emails, texts and codes carry leading/trailing spaces (companies 1,240 names, contacts 4,340 first names, tickets 1,189 subjects, activities 18,783 texts, quote codes, emails ` x@y.it  `).
 - **Rule**: every string field is trimmed; internal whitespace and casing of names/texts are kept as written. Status: decided.
 
 ### 0.4 Duplicate merge
-- When several live rows are the same record: the survivor keeps the `id_legacy` of the row with the latest `ultima_modifica`; each field takes the value of the most recent row that has a non-empty, valid value for it. `ultima_modifica` is always `dd/mm/yyyy HH:MM:SS` in every file. Status: decided.
+- When several live rows are the same record: the survivor keeps the `id_legacy` of the row with the latest `ultima_modifica`; each field takes the value of the most recent row that has a non-empty, valid value for it. `ultima_modifica` is always `dd/mm/yyyy HH:MM:SS` in every file. Tie on `ultima_modifica` (none in the sample): the row that comes later in the file wins. Status: decided.
 
 ### 0.5 Dates come in six shapes
 - **Where**: `data_chiusura` (deals), `aperto_il`/`chiuso_il` (tickets), `data` (activities), `data_cambio` (history).
@@ -51,7 +51,7 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 ### 1.2 The VAT number lives in the notes
 - **Where**: `aziende.note` (free text), 10,799 rows carry one.
 - **How it's written**: `partita iva 84874 281912`, `P. IVA: IT 40969350707`, `PI: 34340014470`, `P.IVA 67105837370`, `p.iva IT11476373136`, mixed with other notes separated by `,`, `;` or ` - `.
-- **Rule**: regex `(?i)(p\.?\s*iva|partita\s*iva|\bpi)\s*[:\s]*(it\s*)?([\d\s]{11,})`, keep digits only; accept only exactly 11 digits. Stored in `partita_iva` (no `IT`, no spaces). Status: decided.
+- **Rule**: regex `(?i)(p\.?\s*iva|partita\s*iva|\bpi)\s*[:\s]*(it\s*)?((?:\d\s*){11})(?!\d)`, keep digits only: exactly 11 digits, a following unrelated number does not spoil the match. Stored in `partita_iva` (no `IT`, no spaces). Status: decided.
 
 ### 1.3 Duplicate companies: same domain or same VAT
 - 1,154 domain groups (2,502 rows) and 1,275 VAT groups among live rows; 835 VAT groups span different domains (`nuovaalimentarirossi.com` vs `.it`, `x.it` vs `x-srl.it`), so VAT catches duplicates the domain misses, and vice versa.
@@ -59,23 +59,23 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 - **What you ruled out**: merging by name+city (generator reuses names); treating the 681 domain groups with different cities as distinct (the request says same site = same company).
 
 ### 1.4 Fields
-- `name` = trimmed `ragione_sociale`; `city` = trimmed `citta`; `state` = trimmed upper `provincia`; `domain` per 1.1; `website` = trimmed original URL (harmless extra); `id_legacy` = `id_azienda`.
+- `name` = trimmed `ragione_sociale`; `city` = trimmed `citta` and `state` = trimmed upper `provincia`, both absent when empty (641 raw rows, 24 surviving companies); `domain` per 1.1; `website` = trimmed original URL (harmless extra); `id_legacy` = `id_azienda`.
 
 ## 2. Contacts (R2, R12)
 
 ### 2.1 Emails
 - **Where**: `contatti.csv`, column `email`. Live rows: 45,372 valid as written, 12,828 valid but upper-case, 6,520 valid but padded with spaces, 1,401 empty; then nine invalid shapes of about 450-500 rows each: `n.d.` (500), `da chiedere` (496), `(at)` as in `alessia.vitale(at)gmail.com` (489), truncated `noemi.cattaneo@gmail` (474), `-` (471), `nessuna` (464), `NO EMAIL` (450), a space before the `@` as in `beatrice.testa @libero.it` (447), truncated `irene.bellini@` (441); 66 rows hold a phone number; about 100 rows hold two addresses (`gallo.enrico@fratellinegri89.it e enrico.gallo@hotmail.it`, separators ` e `, ` / `, `;`, `,`).
-- **Rule**: trim and lower-case; split on ` e `, `/`, `;`, `,`; the first token that matches `^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$` is `email`, further valid tokens go to `hs_additional_emails` (`;`-separated); anything else is an absent email. `(at)` and ` @` are **not** repaired: they occur exactly as often as the clearly invalid placeholders (one corruption branch of the generator, 450-500 rows each) while the recoverable shapes (padding, case) occur thousands of times, and none of the 936 such rows has a twin holding the repaired address. A phone number in the email field goes to `phone` when `phone` is empty, else it is dropped. Status: decided (changed 11:20, was "repair").
+- **Rule**: trim and lower-case; split on ` e `, `/`, `;`, `,`; the first token that matches `^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$` is `email`, further valid tokens go to `hs_additional_emails` (`;`-separated); anything else is an absent email. `(at)` and ` @` are **not** repaired: they occur exactly as often as the clearly invalid placeholders (one corruption branch of the generator, 450-500 rows each) while the recoverable shapes (padding, case) occur thousands of times, and none of the 936 such rows has a twin holding the repaired address. A phone number in the email field (125 rows: `+39 354 827 5053` 66, `03/8764294` 59) goes to `phone` when `phone` is empty, else it is dropped. Status: decided (changed 11:20, was "repair").
 
 ### 2.2 Duplicate contacts: same email, or same name in the same company
 - 5,143 groups (11,301 rows) share a valid email. Separately, 2,870 groups of rows with the same first and last name at the same company: 2,147 of them also share the email (already merged), 714 have **no valid email in any row** (e.g. `irene.bellini@` next to `irene.bellini @libero.it`, `alessia.vitale(at)gmail.com` next to `nessuna`, two empty), 464 of those 714 share the phone; 8 groups have two different valid emails; 1 has one valid email plus a row without. Names repeat massively across companies (7,055 of 7,218 names appear at more than one company) but a same-name pair inside one company is far above chance.
-- **Rule**: union by normalized email (any of the addresses of a row); then, inside the same company, rows with the same normalized first+last name join the same person unless that would join two different valid emails (then the rows with a valid email stay separate by email and the rows without one stay separate). Rows without company and without email are never merged by name alone (23 such groups, chance level). Survivor per 0.4. Status: decided (extended 11:20).
+- **Rule**: union by normalized email (any of the addresses of a row); then, inside the same company, rows with the same normalized first+last name join the same person unless that would join two different valid emails; in that case the rows with a valid email stay separate by email and a row without email joins the email row that comes first in file order (no such group in the sample). After a merge the other addresses of the group become `hs_additional_emails`. Rows without company and without email are never merged by name alone (23 such groups, chance level). Survivor per 0.4. Status: decided (extended 11:20).
 
 ### 2.3 Fields
 - `firstname`/`lastname` trimmed; `phone` trimmed, otherwise as written (`03/8764294`, `+39 354 827 5053`); `lifecyclestage`: `lead` → `lead`, `prospect` → `opportunity`, `cliente` → `customer`, `ex cliente`/`ex-cliente` → `other` (case and spaces ignored); `id_legacy` = `id_contatto`; association to the company from `id_azienda` (valid, live, mapped to the survivor).
 
 ### 2.4 R12 on migrated contacts
-- 13,022 live contacts have no company; 12,487 of them have a valid email and 3,715 of those have a domain equal to a company's `domain` or one of its `hs_additional_domains`.
+- After merging, 3,809 contact rows (2,955 surviving contacts) have no company and an email whose domain equals a company's `domain` or one of its `hs_additional_domains`; 971 of them match only through `hs_additional_domains`.
 - **Rule**: after companies are merged, a contact that ends up without a company association (including those whose company reference was deleted/missing) and whose email domain matches a company gets associated to it. Never creates companies. Existing associations untouched. Free-mail domains (gmail.com, libero.it, ...) match only if a company really has that domain (none does in the sample). Status: decided.
 
 ## 3. Users (`utenti.csv`)
@@ -99,10 +99,10 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 - Negative amounts (831 rows): `€ -5.131,24`, `4,086.16-`, `- 21.527,35`, `-8571,64`; accounting parentheses `(20020,40)` (189 rows). All 1,020 credit-note deals ("Storno fattura ...", "Nota di credito n. ...", "NC 615/24 ...") are negative or parenthesized, all are in Vinta of Vendite, none has quote lines. **Rule**: a trailing `-`, a leading `-` (also after the currency) or parentheses make the amount negative; the amount stays negative in the CRM so R8 subtracts it. Status: decided.
 - Multipliers: `k`/`K` (95 rows), `mila` (73), `mln`/`Mln`/`milione` (34): `€206,5k` = 206500, `6.5mila` = 6500, `152.5 mila` = 152500, `2 mln` = 2000000. **Rule**: multiply. Status: decided.
 - Monthly amounts (841 rows, all in Rinnovi): `51.315,91 mensili`, `500,59 /mese`, `€ 1,641.59 al mese`. **Rule**: "I rinnovi sono annuali" → multiply by 12. Status: decided.
-- Deals with quote lines (12,139 live): `amount` = sum of the line amounts (each rounded to the cent), overriding `importo`; 126 deals differ from `importo` by 1-2 cents, the rest match exactly, which confirms the per-line rounding. Currency stays the deal's (lines are in euro; all such deals are in EUR in the sample, assert it in the migration log). Status: decided.
+- Deals with quote lines (12,139 live): `amount` = sum of the line amounts (each rounded to the cent), overriding `importo`; with Decimal arithmetic and ROUND_HALF_UP per line all 11,659 live deals with lines reproduce `importo` to the cent (half-even or float rounding misses more than a thousand), which fixes the rounding mode: HALF_UP, for line amounts and for the R8 total. Currency stays the deal's (lines are in euro; all such deals are in EUR in the sample, assert it in the migration log). Status: decided.
 
 ### 4.3 Close date
-- 1,356 live won and 1,574 live lost deals have no `data_chiusura`; every one of them has a `storico_fasi` row entering that closed stage. When both exist they agree on the day (2,060 of 2,060).
+- 2,656 live closed deals have no `data_chiusura`; every one of them has a `storico_fasi` row entering that closed stage, none stays without a close date. When both exist they agree on the day (2,060 of 2,060).
 - **Rule**: `closedate` = parsed `data_chiusura`; if empty and the deal is closed (Vinta/Persa/Rinnovato/Non rinnovato), use the `data_cambio` of the latest history row whose `fase_nuova` maps to that stage. Open deals keep `data_chiusura` as the expected close date (13,088 rows). The history's last stage disagrees with `fase` in 3,396 deals (history is incomplete): `fase` wins, history is only used for the date. Status: decided.
 
 ### 4.4 Contacts of a deal
@@ -140,7 +140,7 @@ All nine: `;` separator, Windows-1252, header row, quoted multi-line text fields
 
 ## 8. Revenue 2025 and class (R8)
 
-- Won = `closedwon` in the default pipeline or `Rinnovato` in Rinnovi; `closedate` year 2025 (UTC); associated to the company. Credit notes are won deals with negative amounts in the same year, so plain summation already subtracts them. USD × 0.92, GBP × 1.17, EUR × 1. Sum, round to the cent, `fatturato_2025` as a number with two decimals (`0` when nothing); `classe_cliente` A ≥ 100000, B ≥ 20000, C > 0, empty otherwise. Computed once at the end of the migration. Status: decided.
+- Won = `closedwon` in the default pipeline or `Rinnovato` in Rinnovi; `closedate` year 2025 (UTC); associated to the company. Credit notes are won deals with negative amounts in the same year, so plain summation already subtracts them. USD × 0.92, GBP × 1.17, EUR × 1. Sum, round to the cent, `fatturato_2025` as a number with two decimals (`0` when nothing); `classe_cliente` A ≥ 100000, B ≥ 20000, C > 0, empty otherwise. Computed once at the end of the migration, Decimal with ROUND_HALF_UP. Only 213 won deals close in 2025 in the sample (about 500 per year before, none in 2026), so R8 touches 177 companies, 35 of them with a negative total: small numbers are expected, not a bug. Status: decided.
 
 ## 9. Dormant customers (R9)
 
