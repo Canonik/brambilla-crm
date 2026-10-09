@@ -17,11 +17,11 @@ import { formatNumber } from "@/lib/format";
 import { useDebounced } from "@/lib/useDebounced";
 
 const KEYS = ["q", "class", "sort"] as const;
-const DEFAULTS = { sort: "name" } as const;
+const DEFAULTS = { sort: "revenue" } as const;
 
 const SORTS: Array<{ value: string; label: string; by: CompanyListParams["sortBy"]; dir: CompanyListParams["sortDir"] }> = [
-  { value: "name", label: "Name A to Z", by: "name", dir: "ASCENDING" },
   { value: "revenue", label: "Revenue 2025, highest first", by: "fatturato_2025", dir: "DESCENDING" },
+  { value: "name", label: "Name A to Z", by: "name", dir: "ASCENDING" },
   { value: "updated", label: "Recently updated", by: "hs_lastmodifieddate", dir: "DESCENDING" },
   { value: "city", label: "City", by: "city", dir: "ASCENDING" },
 ];

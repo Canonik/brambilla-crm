@@ -283,7 +283,7 @@ function DealCard({ deal, overlay, company }: { deal: Deal; overlay?: boolean; c
         "cursor-grab rounded-md border border-line bg-surface px-3 py-2.5 text-left shadow-card outline-none transition-shadow",
         "hover:border-line-strong focus-visible:ring-2 focus-visible:ring-gentian/40",
         isDragging && "opacity-40",
-        overlay && "w-72 cursor-grabbing rotate-[1.5deg] shadow-drag",
+        overlay && "w-72 cursor-grabbing rotate-[1.5deg] scale-[1.02] shadow-drag",
       )}
       aria-roledescription="draggable deal"
     >
