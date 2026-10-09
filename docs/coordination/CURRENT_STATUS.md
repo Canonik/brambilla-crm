@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 13:30 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:45 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -102,6 +102,8 @@ tickets with a dead contact reference use the `Da:` line.
 - 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
 - 13:17 Release 3 pushed (78feee0); Railway success 13:18; authenticated production checks pass; tagged `hackitaly-good-002`.
 - 13:19 Merging agent/backend-reliability 9e716c7 for release 4; full check running.
+- 13:39 Organizer form check 6/6 (also 6/6 at 13:10 and 13:21): migration 42.03 s on Railway, example tests 10 of 10, agente OK.
+- 13:43 Human chose R13 as the only remaining direction; Agent 2 runs a second capped smoke on production (cap $0.50) and fixes failures, handoff 14:20. Section 3 list sent to the choice sheet helper.
 - 13:23 to 13:29 Releases 4, 5, 6 pushed and verified (5bb299e, 92c35e8, 6f375a8). All five worker sessions told to go idle to save tokens.
 - 13:21 Human authorized the live assistant smoke on production and release 4. Smoke on release 3: 0 failed checks (scenario 3 revenue skipped, company lookup by the runner). Release 4 pushed 13:23.
 - 13:20 Production migration timing read from /__stats: the 13:10 organizer form check migrated the sample export in 30.9 s on Railway (build 17.3, copy 5.8, indexes 4.9); 538,354 records, 1,666,162 associations, 936 dormant, classes A 52 B 25 C 65, identical to the oracle.
