@@ -52,7 +52,7 @@ def put_default_association(object_type: str, object_id: str, to_type: str, to_i
     return _assoc_result(ot, fid, tt, tid, labels)
 
 
-@router.put("/crm/v4/objects/{object_type}/{object_id}/associations/{to_type}/{to_id}")
+@router.put("/crm/v4/objects/{object_type}/{object_id}/associations/{to_type}/{to_id}", status_code=201)
 async def put_association(object_type: str, object_id: str, to_type: str, to_id: str, request: Request):
     ot = object_type_or_404(object_type)
     tt = object_type_or_404(to_type)
@@ -87,6 +87,10 @@ def delete_association(object_type: str, object_id: str, to_type: str, to_id: st
         s.dissociate(ot, s.resolve_id(ot, object_id, None), tt, s.resolve_id(tt, to_id, None), None)
         conn.commit()
     return Response(status_code=204)
+
+
+def _empty_batch(started: str) -> dict:
+    return {"status": "COMPLETE", "results": [], "startedAt": started, "completedAt": iso(utcnow())}
 
 
 def _type_ids(types) -> list[int]:
@@ -134,7 +138,7 @@ async def batch_create(from_type: str, to_type: str, request: Request):
     return body_out
 
 
-@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/associate/default", status_code=201)
+@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/associate/default")
 async def batch_create_default(from_type: str, to_type: str, request: Request):
     ft = object_type_or_404(from_type)
     tt = object_type_or_404(to_type)
@@ -170,11 +174,12 @@ async def batch_read(from_type: str, to_type: str, request: Request):
     return {"status": "COMPLETE", "results": results, "startedAt": started, "completedAt": iso(utcnow())}
 
 
-@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/archive", status_code=204)
+@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/archive")
 async def batch_archive(from_type: str, to_type: str, request: Request):
     ft = object_type_or_404(from_type)
     tt = object_type_or_404(to_type)
     body = await json_body(request)
+    started = iso(utcnow())
     with db.connection() as conn:
         s = Store(conn)
         for inp in batch_inputs(body):
@@ -185,14 +190,15 @@ async def batch_archive(from_type: str, to_type: str, request: Request):
             for to in tos:
                 s.dissociate(ft, fid, tt, ref_id(to, "to id"), None)
         conn.commit()
-    return Response(status_code=204)
+    return _empty_batch(started)
 
 
-@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/labels/archive", status_code=204)
+@router.post("/crm/v4/associations/{from_type}/{to_type}/batch/labels/archive")
 async def batch_labels_archive(from_type: str, to_type: str, request: Request):
     ft = object_type_or_404(from_type)
     tt = object_type_or_404(to_type)
     body = await json_body(request)
+    started = iso(utcnow())
     with db.connection() as conn:
         s = Store(conn)
         for inp in batch_inputs(body):
@@ -201,7 +207,7 @@ async def batch_labels_archive(from_type: str, to_type: str, request: Request):
             tids = _type_ids(inp.get("types"))
             s.dissociate(ft, fid, tt, tid, tids)
         conn.commit()
-    return Response(status_code=204)
+    return _empty_batch(started)
 
 
 # ------------------------------------------------------------------ schema / labels
@@ -218,7 +224,7 @@ def get_labels(from_type: str, to_type: str):
     return {"results": [_label_row(r) for r in rows]}
 
 
-@router.post("/crm/v4/associations/{from_type}/{to_type}/labels", status_code=201)
+@router.post("/crm/v4/associations/{from_type}/{to_type}/labels")
 async def create_label(from_type: str, to_type: str, request: Request):
     ft = object_type_or_404(from_type)
     tt = object_type_or_404(to_type)
@@ -247,7 +253,7 @@ async def create_label(from_type: str, to_type: str, request: Request):
     return {"results": results}
 
 
-@router.put("/crm/v4/associations/{from_type}/{to_type}/labels")
+@router.put("/crm/v4/associations/{from_type}/{to_type}/labels", status_code=204)
 async def update_label(from_type: str, to_type: str, request: Request):
     body = await json_body(request)
     tid = parse_record_id(body.get("associationTypeId"))

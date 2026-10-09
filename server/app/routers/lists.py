@@ -7,7 +7,7 @@ from .. import db, defaults
 from ..errors import not_found, validation
 from ..store import Store
 from ..util import iso, parse_record_id, utcnow
-from .common import _ANY, int_field, int_limit, json_body
+from .common import _ANY, batch_inputs, int_field, int_limit, json_body
 
 router = APIRouter(prefix="/crm/v3/lists")
 
@@ -83,6 +83,74 @@ async def search_lists(request: Request):
         total = len(items)
         page = [_list_out(conn, d) for d in items[offset:offset + count]]
     return {"lists": page, "hasMore": offset + count < total, "offset": offset + len(page), "total": total}
+
+
+@router.post("/all")
+async def all_lists(request: Request):
+    """2026-09 list-all: ascending list ids, `count` per page, `after` cursor."""
+    body = await json_body(request)
+    types = body.get("processingTypes") or []
+    if not isinstance(types, list):
+        raise validation("processingTypes must be an array")
+    count = int_field(body.get("count"), "count", 20)
+    if count < 1 or count > 500:
+        raise validation("count must be between 1 and 500")
+    after = body.get("after")
+    cursor = 0
+    if after not in (None, ""):
+        cursor = parse_record_id(after)
+        if cursor is None:
+            raise validation(f"Invalid paging cursor: {after}")
+    with db.connection() as conn:
+        rows = conn.execute("SELECT definition FROM lists ORDER BY list_id").fetchall()
+        items = [r["definition"] for r in rows if (not types or r["definition"]["processingType"] in types)]
+        total = len(items)
+        items = [d for d in items if int(d["listId"]) > cursor]
+        page = items[:count]
+        results = [_list_out(conn, d) for d in page]
+    out = {"results": results, "total": total}
+    if len(items) > count:
+        out["paging"] = {"next": {"after": page[-1]["listId"]}}
+    return out
+
+
+def _record_memberships(conn, ot: str, rid: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT m.list_id, m.added_at, l.definition FROM list_memberships m JOIN lists l ON l.list_id = m.list_id WHERE m.record_id = %s ORDER BY m.list_id", (rid,)
+    ).fetchall()
+    return [
+        {"listId": str(r["list_id"]), "listVersion": int(r["definition"].get("listVersion", 1)), "isPublicList": True,
+         "firstAddedTimestamp": iso(r["added_at"]), "lastAddedTimestamp": iso(r["added_at"])}
+        for r in rows if defaults.resolve_type(r["definition"]["objectTypeId"]) == ot
+    ]
+
+
+@router.get("/records/{object_type_id}/{record_id}/memberships")
+def lists_of_record(object_type_id: str, record_id: str):
+    ot = defaults.resolve_type(object_type_id)
+    if ot is None:
+        raise not_found(f"Unknown objectTypeId {object_type_id}")
+    rid = parse_record_id(record_id)
+    if rid is None:
+        raise validation(f"Invalid record id {record_id!r}")
+    with db.connection() as conn:
+        res = _record_memberships(conn, ot, rid)
+    return {"results": res, "total": len(res)}
+
+
+@router.post("/records/memberships/batch/read")
+async def lists_of_records_batch(request: Request):
+    body = await json_body(request)
+    started = iso(utcnow())
+    results = []
+    with db.connection() as conn:
+        for inp in batch_inputs(body):
+            ot = defaults.resolve_type(inp.get("objectTypeId"))
+            rid = parse_record_id(inp.get("recordId"))
+            if ot is None or rid is None:
+                raise validation("each input needs objectTypeId and recordId")
+            results.append({"objectTypeId": defaults.type_id(ot), "recordId": str(rid), "recordListMemberships": _record_memberships(conn, ot, rid)})
+    return {"status": "COMPLETE", "results": results, "startedAt": started, "completedAt": iso(utcnow())}
 
 
 @router.get("/object-type-id/{object_type_id}/name/{list_name}")
@@ -226,6 +294,18 @@ async def add_memberships(list_id: str, request: Request):
         added, missing = add_members(conn, int(d["listId"]), ot, ids)
         conn.commit()
     return {"recordsIdsAdded": added, "recordIdsAdded": added, "recordIdsRemoved": [], "recordIdsMissing": missing}
+
+
+@router.put("/{list_id}/memberships/add-from/{source_list_id}", status_code=204)
+def add_from_list(list_id: str, source_list_id: str):
+    with db.connection() as conn:
+        d = _get(conn, list_id)
+        src = _get(conn, source_list_id)
+        if d["objectTypeId"] != src["objectTypeId"]:
+            raise validation("the source list holds a different object type")
+        conn.execute("INSERT INTO list_memberships (list_id, record_id) SELECT %s, record_id FROM list_memberships WHERE list_id = %s ON CONFLICT DO NOTHING", (int(d["listId"]), int(src["listId"])))
+        conn.commit()
+    return Response(status_code=204)
 
 
 @router.put("/{list_id}/memberships/remove")
