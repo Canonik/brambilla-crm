@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { ArrowUpRight } from "lucide-react";
 import { useDashboard, usePipelines } from "@/api/hooks";
 import { useAssistant } from "@/assistant/AssistantContext";
-import { AssistantChat, Composer, SuggestionChips } from "@/assistant/AssistantChat";
+import { AssistantChat, Composer, EvidenceBadge, SuggestionChips } from "@/assistant/AssistantChat";
 import { AssistantMark } from "@/assistant/AssistantMark";
 import { useCurrentUser } from "@/app/currentUser";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
@@ -42,13 +42,14 @@ export function Home() {
                   <br />
                   {user.name.split(" ")[0]}.
                 </h1>
-                <p className="mt-4 max-w-sm text-[14px] leading-relaxed text-ink-2">Ask in plain words. Answers come in Italian, from the same records as every page.</p>
+                <p className="mt-4 max-w-sm text-[14px] leading-relaxed text-ink-2">Every answer shows its evidence: which records were read, what changed, which rule fired.</p>
               </Rise>
               <Rise delay={0.08} className="min-w-0">
                 <div className="rounded-[22px] border border-line bg-surface p-4 text-ink shadow-pop">
                   <div className="mb-3 flex items-center gap-2.5 px-1">
                     <AssistantMark size={26} />
                     <span className="text-[14px] font-semibold">Ask the CRM</span>
+                    <EvidenceBadge />
                   </div>
                   <SuggestionChips limit={4} />
                   <Composer size="lg" autoFocus className="mt-3" />
