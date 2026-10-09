@@ -25,31 +25,55 @@ def expected():
     return sinergia.migrate(sinergia.load_export(EXPORT_ZIP))
 
 
-@pytest.fixture(scope="module")
-def ids(client, migrated, expected):
-    """id_legacy -> CRM id maps per object type, read through search pagination (every record once)."""
-    from tests.reference.sinergia import KEY_PROPERTY
+class Resolver:
+    """id_legacy (or hs_sku for products) -> CRM id, resolved lazily in batches of IN searches."""
 
-    out = {}
-    for ot in OBJECTS:
-        key = KEY_PROPERTY.get(ot, "id_legacy")
-        m = {}
-        after = None
-        total = None
-        while True:
-            res = search(client, ot, properties=[key], limit=200, after=after, sorts=[{"propertyName": "hs_object_id", "direction": "ASCENDING"}])
-            total = res["total"]
+    def __init__(self, client):
+        self.client = client
+        self.cache = {ot: {} for ot in OBJECTS}
+
+    def key_prop(self, ot):
+        return "hs_sku" if ot == "products" else "id_legacy"
+
+    def resolve(self, ot, keys):
+        keys = [str(k) for k in keys]
+        missing = [k for k in keys if k not in self.cache[ot]]
+        for i in range(0, len(missing), 100):
+            chunk = missing[i:i + 100]
+            res = search(self.client, ot, [{"propertyName": self.key_prop(ot), "operator": "IN", "values": chunk}], [self.key_prop(ot)], limit=200)
+            assert res["total"] <= len(chunk), f"{ot}: duplicate keys in CRM for {chunk[:5]}"
             for x in res["results"]:
-                m[x["properties"].get(key)] = x["id"]
-            after = res.get("paging", {}).get("next", {}).get("after")
+                self.cache[ot][x["properties"][self.key_prop(ot)]] = x["id"]
+            for k in chunk:
+                self.cache[ot].setdefault(k, None)
+        return {k: self.cache[ot][k] for k in keys}
+
+    def one(self, ot, key):
+        return self.resolve(ot, [key])[str(key)]
+
+    def all_pairs(self, ot, limit=100):
+        """Walk the whole list endpoint: (id, key) for every record, exactly once."""
+        after = None
+        seen = {}
+        while True:
+            params = {"limit": limit, "properties": self.key_prop(ot)}
+            if after:
+                params["after"] = after
+            r = self.client.get(f"/crm/v3/objects/{ot}", params=params)
+            assert r.status_code == 200, r.text[:200]
+            body = r.json()
+            for x in body["results"]:
+                assert x["id"] not in seen, f"{ot}: id {x['id']} returned twice while paging"
+                seen[x["id"]] = x["properties"].get(self.key_prop(ot))
+            after = body.get("paging", {}).get("next", {}).get("after")
             if not after:
                 break
-            if len(m) > 10000:
-                break
-        if len(m) <= 10000:
-            assert total == len(m), f"{ot}: total {total} but {len(m)} distinct records paged"
-        out[ot] = m
-    return out
+        return seen
+
+
+@pytest.fixture(scope="module")
+def ids(client, migrated):
+    return Resolver(client)
 
 
 def test_migration_time(migrated):
@@ -86,17 +110,20 @@ def test_sample_records_fields(client, expected, ids, ot):
     exp = getattr(expected, ot)
     rng = random.Random(42)
     keys = rng.sample(sorted(exp), min(SAMPLE, len(exp)))
-    missing = [k for k in keys if k not in ids[ot]]
-    assert not missing, f"{ot}: id_legacy missing in CRM: {missing[:10]}"
+    found = ids.resolve(ot, keys)
+    missing = [k for k in keys if not found[k]]
+    assert not missing, f"{ot}: key missing in CRM: {missing[:10]}"
     for k in keys:
-        rec = client.get(f"/crm/v3/objects/{ot}/{ids[ot][k]}").json()
+        rec = client.get(f"/crm/v3/objects/{ot}/{found[k]}").json()
         _check_props(rec["properties"], exp[k], f"{ot} {k}")
 
 
 def test_merged_rows_are_gone(client, expected, ids):
     for ot in ("companies", "contacts"):
         merged = getattr(expected, "merged_into")[ot]
-        gone = [old for old in list(merged)[:200] if old != merged[old] and old in ids[ot]]
+        olds = [old for old in list(merged)[:300] if old != merged[old]]
+        found = ids.resolve(ot, olds)
+        gone = [old for old in olds if found[old]]
         assert not gone, f"{ot}: merged rows still present: {gone[:10]}"
 
 
@@ -105,9 +132,11 @@ def test_associations_sample(client, expected, ids):
     assocs = sorted(expected.associations)
     picked = rng.sample(assocs, min(300, len(assocs)))
     bad = []
+    for ot in OBJECTS:
+        ids.resolve(ot, [fl for (f, fl, t, tl) in picked if f == ot] + [tl for (f, fl, t, tl) in picked if t == ot])
     for from_ot, from_legacy, to_ot, to_legacy in picked:
-        fid = ids[from_ot].get(from_legacy)
-        tid = ids[to_ot].get(to_legacy)
+        fid = ids.one(from_ot, from_legacy)
+        tid = ids.one(to_ot, to_legacy)
         if fid is None or tid is None:
             bad.append(("missing record", from_ot, from_legacy, to_ot, to_legacy))
             continue
@@ -117,8 +146,9 @@ def test_associations_sample(client, expected, ids):
     # deals: contacts associated exactly once and no stray associations
     for legacy in rng.sample(sorted(expected.deals), 30):
         exp_contacts = {t for (f, fl, tt, t) in assocs if f == "deals" and fl == legacy and tt == "contacts"}
-        got = assoc_ids(client, "deals", ids["deals"][legacy], "contacts")
-        assert got == {ids["contacts"][c] for c in exp_contacts}, f"deal {legacy} contacts"
+        got = assoc_ids(client, "deals", ids.one("deals", legacy), "contacts")
+        want = set(ids.resolve("contacts", exp_contacts).values())
+        assert got == want, f"deal {legacy} contacts: got {got} want {want}"
 
 
 def test_r8_revenue_and_class(client, expected, ids):
@@ -126,8 +156,11 @@ def test_r8_revenue_and_class(client, expected, ids):
     comps = expected.companies
     with_rev = [k for k, v in comps.items() if Decimal(v.get("fatturato_2025", "0") or "0") != 0]
     zero = [k for k, v in comps.items() if Decimal(v.get("fatturato_2025", "0") or "0") == 0]
-    for k in rng.sample(with_rev, min(40, len(with_rev))) + rng.sample(zero, min(10, len(zero))):
-        p = client.get(f"/crm/v3/objects/companies/{ids['companies'][k]}", params={"properties": "fatturato_2025,classe_cliente,name"}).json()["properties"]
+    sample = rng.sample(with_rev, min(len(with_rev), 200)) + rng.sample(zero, min(20, len(zero)))
+    found = ids.resolve("companies", sample)
+    for k in sample:
+        assert found[k], f"company {k} missing"
+        p = client.get(f"/crm/v3/objects/companies/{found[k]}", params={"properties": "fatturato_2025,classe_cliente,name"}).json()["properties"]
         assert Decimal(p.get("fatturato_2025") or "0") == Decimal(comps[k]["fatturato_2025"]), f"{k} {p}"
         assert (p.get("classe_cliente") or "") == (comps[k].get("classe_cliente") or ""), f"{k} {p}"
     for cls in ("A", "B", "C"):
@@ -151,9 +184,12 @@ def test_r9_dormant_list(client, expected, ids):
         after = res.get("paging", {}).get("next", {}).get("after")
         if not after:
             break
-    exp = {ids["companies"][k] for k in expected.dormant if k in ids["companies"]}
+    found = ids.resolve("companies", sorted(expected.dormant))
+    exp = {v for v in found.values() if v}
     assert len(members) == len(expected.dormant), f"dormant: {len(members)} != {len(expected.dormant)}"
-    assert members == exp
+    extra = members - exp
+    missing = exp - members
+    assert not extra and not missing, f"dormant extra {sorted(extra)[:10]} missing {sorted(missing)[:10]}"
 
 
 def test_custom_properties_and_pipelines(client, migrated):
@@ -180,7 +216,10 @@ def test_reads_fast_under_load(client, ids, base_url, token):
 
     import httpx
 
-    sample = random.Random(1).sample(list(ids["contacts"].values()), 100)
+    pairs = ids.all_pairs("contacts", limit=100)
+    total = search(client, "contacts", limit=1)["total"]
+    assert len(pairs) == total, f"paged {len(pairs)} contacts, search total {total}"
+    sample = random.Random(1).sample(list(pairs), 100)
 
     def read(i):
         with httpx.Client(base_url=base_url, headers={"Authorization": f"Bearer {token}"}, timeout=30) as c:
