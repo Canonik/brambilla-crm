@@ -195,17 +195,22 @@ def parse_amount(importo: str | None) -> Decimal | None:
 
 
 def parse_currency(importo: str | None, valuta: str | None) -> str | None:
-    s = (importo or "").strip()
-    if s.startswith("(") and s.endswith(")"):
-        s = s[1:-1].strip()
-    m = _CUR_PREFIX.match(s) or _CUR_SUFFIX.search(s)
-    if m:
-        c = CURRENCY_MAP.get(m.group(1).lower())
-        if c:
-            return c
     v = (valuta or "").strip().lower()
     if v:
-        return CURRENCY_MAP.get(v, v.upper() if len(v) == 3 else None)
+        c = CURRENCY_MAP.get(v)
+        if c:
+            return c
+        if len(v) == 3 and v.isalpha():
+            return v.upper()
+    s = (importo or "").strip().lower()
+    if "usd" in s or "$" in s:
+        return "USD"
+    if "gbp" in s or "£" in s:
+        return "GBP"
+    if "chf" in s:
+        return "CHF"
+    if "eur" in s or "€" in s:
+        return "EUR"
     return None
 
 
@@ -280,6 +285,7 @@ def parse_email(s: str | None) -> str | None:
 
 
 _PHONE_RE = re.compile(r"^\+?[\d\s/().-]{6,}$")
+_EMAIL_SIMPLE = re.compile(r"^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$")
 
 
 def parse_emails(s: str | None) -> tuple[list[str], str | None]:
@@ -289,13 +295,13 @@ def parse_emails(s: str | None) -> tuple[list[str], str | None]:
     raw = fix_text(s).strip()
     if not raw:
         return [], None
-    if "@" not in raw and _PHONE_RE.match(raw) and re.search(r"\d{5,}", raw.replace(" ", "")):
+    if "@" not in raw and _PHONE_RE.match(raw) and re.search(r"\d{6}", re.sub(r"\D", "", raw)):
         return [], raw
-    tokens = re.split(r"\s+e\s+|\s*[;,/|]\s*|\s+(?:o|or|and|&)\s+", raw, flags=re.I)
+    tokens = re.split(r"\s+e\s+|/|;|,", raw.lower())
     out = []
     for t in tokens:
-        t = t.strip().strip("<>\"'").lower()
-        if t and valid_email(t) and t not in out:
+        t = t.strip().strip("<>\"'")
+        if t and _EMAIL_SIMPLE.match(t) and t not in out:
             out.append(t)
     return out, None
 

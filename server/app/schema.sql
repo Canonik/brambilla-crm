@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS objects (
 );
 CREATE SEQUENCE IF NOT EXISTS objects_id_seq START 1;
 CREATE INDEX IF NOT EXISTS objects_type_id_idx ON objects (object_type, id) WHERE NOT archived;
-CREATE INDEX IF NOT EXISTS objects_props_gin_idx ON objects USING gin (properties jsonb_path_ops);
+DROP INDEX IF EXISTS objects_props_gin_idx;
 CREATE INDEX IF NOT EXISTS objects_id_legacy_idx ON objects ((properties->>'id_legacy'));
 CREATE UNIQUE INDEX IF NOT EXISTS objects_contact_email_uq ON objects ((properties->>'email')) WHERE object_type = 'contacts' AND NOT archived AND properties ? 'email';
 CREATE UNIQUE INDEX IF NOT EXISTS objects_company_piva_uq ON objects ((properties->>'partita_iva')) WHERE object_type = 'companies' AND NOT archived AND properties ? 'partita_iva';

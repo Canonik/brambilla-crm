@@ -342,8 +342,8 @@ HUBSPOT_ASSOCIATION_TYPES = [
     (13, "companies", "companies", "Parent Company", "parent_to_child_company", 14),
     (14, "companies", "companies", "Child Company", "child_to_parent_company", 13),
     # line items <-> products (not in HubSpot's public table; kept stable here)
-    (901, "line_items", "products", None, "line_item_to_product", 902),
-    (902, "products", "line_items", None, "product_to_line_item", 901),
+    (901, "line_items", "products", "Product", "line_item_to_product", 902),
+    (902, "products", "line_items", "Line item", "product_to_line_item", 901),
     # activities (HubSpot: activity -> object ids are the even ones, e.g. note_to_contact 202)
     (202, "notes", "contacts", None, "note_to_contact", 201), (201, "contacts", "notes", None, "contact_to_note", 202),
     (190, "notes", "companies", None, "note_to_company", 189), (189, "companies", "notes", None, "company_to_note", 190),
@@ -436,6 +436,6 @@ def ensure_defaults(conn=None) -> None:
             conn.execute("INSERT INTO pipelines (object_type, id, definition) VALUES (%s, %s, %s::jsonb)", (ot, pl["id"], json.dumps(pl)))
     conn.execute("DELETE FROM association_labels")
     conn.cursor().executemany(
-        "INSERT INTO association_labels (type_id, from_type, to_type, label, name, category, inverse_type_id) VALUES (%s, %s, %s, %s, %s, 'HUBSPOT_DEFINED', %s)",
-        [(t[0], t[1], t[2], t[3], t[4], t[5]) for t in HUBSPOT_ASSOCIATION_TYPES],
+        "INSERT INTO association_labels (type_id, from_type, to_type, label, name, category, inverse_type_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        [(t[0], t[1], t[2], t[3], t[4], "USER_DEFINED" if t[0] in (901, 902) else "HUBSPOT_DEFINED", t[5]) for t in HUBSPOT_ASSOCIATION_TYPES],
     )
