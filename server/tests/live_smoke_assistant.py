@@ -114,7 +114,7 @@ for t in tk:
 
 # 3. example 2: revenue of a migrated company (skipped when not migrated)
 print("\n=== 3. revenue question (migrated data) ===")
-hits = search("companies", [{"propertyName": "name", "operator": "CONTAINS_TOKEN", "value": "Spinelli"}], limit=50)
+hits = search("companies", query="Nuova Tessile Spinelli", limit=50)
 target = [h for h in hits["results"] if "nuova tessile spinelli" in h["properties"]["name"].lower()]
 if target:
     expected = {round(float(h["properties"].get("fatturato_2025") or 0), 2) for h in target}

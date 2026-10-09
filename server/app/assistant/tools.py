@@ -349,7 +349,10 @@ class ToolContext:
         if err:
             return err
         lim = min(max(int(limit or 25), 1), 50)
-        return {"attachment": att.get("name"), "object_type": kind, "object_label": A.KIND_LABEL[kind], "summary": A.summarize(plans), "rows": [p.out() for p in plans[:lim]], "truncated": len(plans) > lim}
+        out = {"attachment": att.get("name"), "object_type": kind, "object_label": A.KIND_LABEL[kind], "summary": A.summarize(plans), "rows": [p.out() for p in plans[:lim]], "truncated": len(plans) > lim}
+        if any("R3" in w for p in plans for w in p.warnings):
+            out["guidance"] = "Righe con un commerciale/assegnatario che non lavora più: si importano comunque, con il campo vuoto (R3, come nella migrazione). Non è un motivo per rifiutare l'import: importa e riferisci quali righe hanno il campo vuoto."
+        return out
 
     def import_attachment(self, store: Store, name=None, object_type=None, update_existing=None, skip_lines=None):
         att, kind, plans, err = self._attachment_plans(store, name, object_type)
@@ -891,10 +894,22 @@ class ToolContext:
         self.writes.append(f"dissociate {ft} {from_id} -> {tt} {to_id}")
         return {"ok": True}
 
-    def archive_record(self, store: Store, object_type: str, id: str):
+    def archive_record(self, store: Store, object_type: str, id: str, confirmed: bool = False):
         ot = defaults.resolve_type(object_type)
         if ot is None:
             return {"error": f"tipo oggetto sconosciuto: {object_type}"}
+        if ot == "companies" and not confirmed:
+            try:
+                cid = int(str(id).strip())
+            except ValueError:
+                cid = None
+            if cid is not None:
+                n = store.conn.execute(
+                    "SELECT count(DISTINCT o.id) AS n FROM associations a JOIN objects o ON o.id = a.to_id AND o.object_type = 'deals' AND NOT o.archived WHERE a.from_id = %s AND a.to_type = 'deals' AND COALESCE(o.properties->>'hs_is_closed', 'false') <> 'true'",
+                    (cid,),
+                ).fetchone()["n"]
+                if n:
+                    return {"error": f"l'azienda ha {n} trattative aperte: archiviarla le lascia senza cliente. Non archiviata. Chiedi conferma all'utente; solo se conferma esplicitamente richiama archive_record con confirmed=true.", "status": 409, "requires_confirmation": True, "open_deals": n}
         try:
             with store.conn.transaction():
                 store.get(ot, id)
@@ -955,7 +970,7 @@ TOOL_SCHEMAS = [
     _schema("update_record", "Aggiorna proprietà di un record esistente (es. dealstage 'Vinta' per segnare vinta, amount, closedate, hs_pipeline_stage per i ticket).", {"object_type": S("tipo"), "id": S("id"), "properties": {"type": "object", "description": "proprietà da modificare"}}, ["object_type", "id", "properties"]),
     _schema("associate", "Associa due record (es. contatto ad azienda, trattativa a contatto).", {"from_type": S("tipo"), "from_id": S("id"), "to_type": S("tipo"), "to_id": S("id")}, ["from_type", "from_id", "to_type", "to_id"]),
     _schema("dissociate", "Rimuove un'associazione tra due record.", {"from_type": S("tipo"), "from_id": S("id"), "to_type": S("tipo"), "to_id": S("id")}, ["from_type", "from_id", "to_type", "to_id"]),
-    _schema("archive_record", "Archivia (elimina) un record.", {"object_type": S("tipo"), "id": S("id")}, ["object_type", "id"]),
+    _schema("archive_record", "Archivia (elimina) un record. Un'azienda con trattative aperte non si archivia senza conferma esplicita dell'utente (confirmed=true solo dopo la sua conferma).", {"object_type": S("tipo"), "id": S("id"), "confirmed": B("true solo se l'utente ha confermato esplicitamente dopo averlo avvisato")}, ["object_type", "id"]),
     _schema("create_records_bulk", "Crea più record dello stesso tipo in un colpo (es. contatti da un CSV allegato). Ogni elemento: {properties: {...}, associations: [...]}.", {"object_type": S("tipo"), "records": {"type": "array", "items": {"type": "object"}, "description": "elenco record"}}, ["object_type", "records"]),
     _schema("find_by_legacy_id", "Trova un record dal suo codice Sinergia (id_legacy: es. 'ticket 595833', 'azienda 264566', 'trattativa 28595675'). Cerca in tutti i tipi se object_type manca.", {"id_legacy": S("codice Sinergia"), "object_type": S("companies, contacts, deals, tickets, line_items, notes, calls, emails, meetings (opzionale)")}, ["id_legacy"]),
     _schema("search_products", "Cerca articoli del listino per codice (hs_sku, es. BF-12288 o 12288) o descrizione. Restituisce id, codice, descrizione e prezzo in euro.", {"sku": S("codice articolo"), "name": S("descrizione o parte"), "limit": I("max risultati")}),
