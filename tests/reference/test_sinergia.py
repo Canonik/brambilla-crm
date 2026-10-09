@@ -131,6 +131,36 @@ def test_parse_discount(raw, expected):
     assert S.num_str(S.parse_discount(raw)) == expected
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("Societ\u00c3\u00a0 Verniciature", "Societ\u00e0 Verniciature"),   # UTF-8 bytes C3 A0 read as cp1252
+    ("Errore di quantit\u00c3\u00a0", "Errore di quantit\u00e0"),        # trailing: must be repaired before strip
+    ("Dal\u00c3\u00b2", "Dal\u00f2"), ("Cant\u00c3\u00b9", "Cant\u00f9"), ("D\u00c3\u00a9bora", "D\u00e9bora"),
+    ("venerd\u00c3\u00ac", "venerd\u00ec"), ("Societ\u00e0 gi\u00e0 ok", "Societ\u00e0 gi\u00e0 ok"), ("Nuova Impianti", "Nuova Impianti"),
+    ("", ""),
+])
+def test_fix_encoding(raw, expected):
+    assert S.fix_encoding(raw) == expected
+
+
+def test_load_export_repairs_mixed_rows(tmp_path):
+    d = tmp_path / "exp"
+    d.mkdir()
+    for name in S.FILES:
+        (d / f"{name}.csv").write_bytes(b"")
+    (d / "aziende.csv").write_bytes(
+        "id_azienda;ragione_sociale;sito_web;note;citta;provincia;cancellato;ultima_modifica\n".encode("cp1252")
+        + "1;Societ\u00e0 Uno;;;Cant\u00f9;CO;;01/01/2020 10:00:00\n".encode("utf-8")
+        + "2;Societ\u00e0 Due;;;Forl\u00ec;FC;;01/01/2020 10:00:00\n".encode("cp1252")
+        + "3;Errore di quantit\u00e0;;;;;;01/01/2020 10:00:00\n".encode("utf-8")
+    )
+    for name in S.FILES:
+        if name != "aziende":
+            (d / f"{name}.csv").write_bytes(b"a;b\n")
+    rows = S.load_export(d)["aziende"]
+    assert [r["ragione_sociale"] for r in rows] == ["Societ\u00e0 Uno", "Societ\u00e0 Due", "Errore di quantit\u00e0"]
+    assert [r["citta"] for r in rows] == ["Cant\u00f9", "Forl\u00ec", ""]
+
+
 def test_truthy():
     for v in ["S", "s", "SI", "Sì", "1", " si "]:
         assert S.truthy(v)

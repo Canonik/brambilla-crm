@@ -68,6 +68,20 @@ def truthy(v: str) -> bool:
     return (v or "").strip().lower() in TRUE_SET
 
 
+MOJIBAKE_RE = re.compile(r"[\u00c2\u00c3][\u0080-\u00bf\u20ac\u2018-\u201e\u2020-\u2022\u2026\u02dc\u2122\u0160\u0161\u017d\u017e\u0152\u0153\u0178\u0192\u02c6\u2030\u2039\u203a\u00a0-\u00bf]")
+
+
+def fix_encoding(v: str) -> str:
+    """The files are cp1252, but about 4,600 rows (companies, contacts, tickets) are UTF-8: once read as
+    cp1252 they show `SocietÃ ` for `Società`. Re-encode and decode those fields; leave everything else."""
+    if not v or not MOJIBAKE_RE.search(v):
+        return v
+    try:
+        return v.encode("cp1252").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return v
+
+
 def norm_text(s: str) -> str:
     s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
     return re.sub(r"\s+", " ", s.strip().lower())
@@ -324,7 +338,7 @@ def load_export(path: str | Path) -> dict[str, list[dict]]:
     for rows in out.values():
         for r in rows:
             for k, v in list(r.items()):
-                r[k] = (v or "").strip()
+                r[k] = fix_encoding(v or "").strip()
     return out
 
 
@@ -399,7 +413,7 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
         for r in rows:
             for k, v in r.items():
                 if isinstance(v, str):
-                    r[k] = v.strip()
+                    r[k] = fix_encoding(v).strip()
     users = Users(data["utenti"])
     ex.users = list(users.by_id.values())
 
