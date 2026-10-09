@@ -193,9 +193,15 @@ function agentReply(body: AgentRequest, d: MockDb): string {
 }
 
 function agentEvidence(body: AgentRequest, d: MockDb) {
+  // Demo-only fixture in the same v1 envelope the server emits; never shown
+  // as live evidence (the shell carries the "Demo data" badge whenever mocks
+  // are on). Relations mirror what the real company_overview/revenue tools
+  // report: the company and the records the store resolved through its
+  // associations.
   const last = body.messages.filter((message) => message.role === "user").at(-1)?.content ?? "";
   const q = last.toLowerCase();
   const company = d.companies.find((item) => q.includes(item.properties.name!.split(" ").slice(0, 2).join(" ").toLowerCase()));
+  const ref = (type: string, id: string) => ({ type, id });
   if (q.includes("fatturat") && company) {
     const dealIds = Array.from(d.assoc.companies?.[company.id]?.deals ?? []);
     const rates: Record<string, number> = { EUR: 1, USD: 0.92, GBP: 1.17 };
@@ -203,7 +209,7 @@ function agentEvidence(body: AgentRequest, d: MockDb) {
       .filter((deal) => deal.properties.dealstage === "closedwon" && (deal.properties.closedate ?? "").startsWith("2025"));
     const deals = matchingDeals.slice(0, 20);
     const terms = deals.map((deal) => ({
-      record: { type: "deals", id: deal.id },
+      record: ref("deals", deal.id),
       amount: (Number(deal.properties.amount ?? 0) * (rates[deal.properties.deal_currency_code ?? "EUR"] ?? 1)).toFixed(2),
     }));
     const result = terms.reduce((sum, term) => sum + Number(term.amount), 0).toFixed(2);
@@ -211,9 +217,44 @@ function agentEvidence(body: AgentRequest, d: MockDb) {
       version: 1, incomplete: matchingDeals.length > 20,
       events: [
         { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
-        { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Company lookup", records: [{ type: "companies", id: company.id }] },
+        { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Searched companies", count: 1, total: 1, records: [ref("companies", company.id)] },
         { sequence: 3, call: 2, tool: "revenue", operation: "read", status: "attempted" },
-        { sequence: 4, call: 2, tool: "revenue", operation: "read", status: "completed", durationMs: 27, inputSummary: `Revenue for company #${company.id} in 2025`, records: [{ type: "companies", id: company.id }, ...terms.map((term) => term.record)], calculation: { kind: "sum_money_v1", policy: "brambilla_revenue_v1", currency: "EUR", populationComplete: matchingDeals.length <= 20, populationCount: matchingDeals.length, terms, result, year: 2025 } },
+        { sequence: 4, call: 2, tool: "revenue", operation: "read", status: "completed", durationMs: 27, inputSummary: `Revenue for company #${company.id} in 2025`,
+          records: [ref("companies", company.id), ...terms.map((term) => term.record)],
+          relations: terms.map((term) => ({ from: ref("companies", company.id), to: term.record })),
+          calculation: { kind: "sum_money_v1", policy: "brambilla_revenue_v1", currency: "EUR", populationComplete: matchingDeals.length <= 20, populationCount: matchingDeals.length, terms, result, year: 2025 } },
+      ],
+    };
+  }
+  if (q.includes("vinta") && company) {
+    const dealIds = Array.from(d.assoc.companies?.[company.id]?.deals ?? []);
+    const contactIds = Array.from(d.assoc.companies?.[company.id]?.contacts ?? []).slice(0, 3);
+    const won = dealIds.map((id) => d.deals.find((deal) => deal.id === id)).filter((deal): deal is Row => Boolean(deal)).find((deal) => deal.properties.dealstage === "closedwon");
+    const members = [...contactIds.map((id) => ref("contacts", id)), ...dealIds.slice(0, 4).map((id) => ref("deals", id))];
+    const events: Record<string, unknown>[] = [
+      { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
+      { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 14, inputSummary: "Searched companies", count: 1, total: 1, records: [ref("companies", company.id)] },
+      { sequence: 3, call: 2, tool: "company_overview", operation: "read", status: "attempted" },
+      { sequence: 4, call: 2, tool: "company_overview", operation: "read", status: "completed", durationMs: 33, inputSummary: `Company #${company.id}`,
+        records: [ref("companies", company.id), ...members], relations: members.map((member) => ({ from: ref("companies", company.id), to: member })) },
+    ];
+    if (won) {
+      events.push(
+        { sequence: 5, call: 3, tool: "update_record", operation: "write", status: "attempted" },
+        { sequence: 6, call: 3, tool: "update_record", operation: "write", status: "awaiting_commit" },
+        { sequence: 7, call: 3, tool: "update_record", operation: "write", status: "committed", durationMs: 41, inputSummary: `deals #${won.id}`, records: [ref("deals", won.id)] },
+      );
+    }
+    return { version: 1, incomplete: false, events };
+  }
+  if (q.includes("ticket") && company) {
+    return {
+      version: 1, incomplete: false,
+      events: [
+        { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
+        { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 11, inputSummary: "Searched companies", count: 1, total: 1, records: [ref("companies", company.id)] },
+        { sequence: 3, call: 2, tool: "create_record", operation: "write", status: "attempted" },
+        { sequence: 4, call: 2, tool: "create_record", operation: "write", status: "rolled_back", durationMs: 6, inputSummary: "New tickets record", failure: "validation", records: [] },
       ],
     };
   }
@@ -221,7 +262,7 @@ function agentEvidence(body: AgentRequest, d: MockDb) {
     version: 1, incomplete: false,
     events: [
       { sequence: 1, call: 1, tool: "search_companies", operation: "read", status: "attempted" },
-      { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Company lookup", records: d.companies.slice(0, 2).map((item) => ({ type: "companies", id: item.id })) },
+      { sequence: 2, call: 1, tool: "search_companies", operation: "read", status: "completed", durationMs: 18, inputSummary: "Searched companies", count: 2, total: 2, records: d.companies.slice(0, 2).map((item) => ref("companies", item.id)) },
     ],
   };
 }
