@@ -62,7 +62,7 @@ All in `frontend/src/api/endpoints.ts`. Shapes follow HubSpot CRM v3.
 - `GET /crm/v3/pipelines/deals`, `GET /crm/v3/pipelines/tickets`: `results[].stages[]` with `id`, `label`, `displayOrder`, `metadata.isClosed`, `metadata.probability`. The sales pipeline must have id `default` with the HubSpot stage ids; the UI translates known Italian labels (Rinnovi, Assistenza and their stages) to English.
 - `GET /crm/v3/lists/object-type-id/0-2/name/Clienti%20dormienti` returning `{ list: { listId, name } }`, then `GET /crm/v3/lists/{listId}/memberships?limit=250&after=` returning `{ results: [{recordId}], paging, total }`.
 - `GET /health` (no token).
-- `POST /__agente` with the brief's body `{ context: { now, user }, messages: [...] }`, reading `reply`. If the response also carries `trace` or `tools` (array of `{tool|name, input|args, output|result, summary}`) the chat shows it as "How this answer was produced". Optional.
+- `POST /__agente?trace=1` with the brief's body `{ context: { now, user }, messages: [...] }`, reading `reply`. Per the contract the bare call returns exactly `{reply}`; with `trace=1` the backend may add `trace: [{tool, input, output, summary}]`, which the chat renders as "How this answer was produced" only when present.
 
 Properties requested per object are listed at the top of `endpoints.ts` (`COMPANY_PROPS`, `DEAL_PROPS`, ...). Unknown properties can come back as `null`.
 
