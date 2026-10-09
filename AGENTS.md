@@ -5,7 +5,7 @@
 **Goal:** Maximize objective judge score first, then compete on product/UI among the six highest-scoring projects.  
 **Repository:** `brambilla-crm` (new, originally an empty application repo; supplied starter documentation/data only).
 
-> This file is the common source of coordination context for all three agents. The official challenge files are the authoritative specification. If this handoff disagrees with `BRIEF.md`, `FAQ.md`, or `legacy/RICHIESTE.md`, the official files win. Do not infer request/response schemas from this summary.
+> This file is the common source of coordination context for all eight agents. The official challenge files are the authoritative specification. If this handoff disagrees with `BRIEF.md`, `FAQ.md`, or `legacy/RICHIESTE.md`, the official files win. Do not infer request/response schemas from this summary.
 
 ## 1. Challenge and scoring
 
@@ -40,17 +40,39 @@ The judge's **form check** exercises `/health`, `/__reset`, `/__migrate`, `/__ag
 - Freeze: 15:30; **no push, redeploy, or changed environment variables afterward**.
 - Ranking: 16:30. Top 3 give an 8-minute pitch.
 
-## 3. Team and ownership (three Codex sessions, separate worktrees)
+## 3. Team and ownership (eight agents, separate worktrees, one branch each)
 
-| Agent | Branch/worktree | Owns | Must not do |
+| Agent | Branch | Owns | Must not do |
 |---|---|---|---|
-| Coordinator | `main` / `~/projects/brambilla-crm` | `AGENTS.md`, `docs/INTEGRATION_CONTRACT.md`, root deployment/CI/tests, Railway, merges, `DECISIONS.md`, form checks, choices | Reimplement worker features unnecessarily |
-| Core / Evaluation | `agent/core` / `~/projects/brambilla-core` | `server/`: schema, migration, R1–R13 logic, API endpoints, GPT-6 assistant, backend tests and API docs | Touch `frontend/`, deploy production, push to `main` |
-| UI / Product | `agent/ui` / `~/projects/brambilla-ui` | `frontend/`: English UI, company page, deals board, dormant customers, tickets, chat UI, frontend tests | Touch `server/`, root deploy files, push to `main` |
+| 1 Coordinator | `main` (`~/projects/brambilla-crm`) | `AGENTS.md`, `DECISIONS.md`, `README.md`, `docs/` (except `docs/research/`), root `Dockerfile`, `railway.json`, `Makefile`, `.github/`, `tests/acceptance/`, `tests/reference/`, Railway, merges, form checks, choices | Reimplement worker features |
+| 2 Core | `agent/core` (`~/projects/brambilla-core`) | `server/`: schema, migration, R1-R13, CRM API, assistant, `server/tests`, `server/API_FOR_UI.md`, `server/HANDOFF.md` | Touch `frontend/`, root deploy files, push to `main` |
+| 3 UI | `agent/ui` (`~/projects/brambilla-ui`) | `frontend/`: screens, chat UI, `frontend/HANDOFF.md` | Touch `server/`, root deploy files, push to `main` |
+| 4 Assistant evaluator | `agent/assistant-eval` | `tests/assistant-eval/`, R13 evaluation reports | Spend model credit without a plan: at most a few conversations per run, never in loops |
+| 5 Backend auditor | `agent/backend-audit` | `tests/backend-audit/`, backend correctness audit reports | Edit `server/` (report findings to Core via the coordinator) |
+| 6 Frontend integration | `agent/frontend-qa` | `tests/frontend-qa/`, frontend integration audit reports | Edit `frontend/` |
+| 7 Challenge intelligence | `agent/challenge-intel` | `docs/research/challenge-intelligence.md`, official-source research | Change contracts |
+| 8 Interpretability researcher | `agent/assistant-evidence` | `experiments/assistant-evidence/` and its docs | Add a separate AI feature; claim activation-level inspection |
 
-Coordinator is the **sole integration/deployment owner**. Worker agents commit frequently on their own branches. Coordinator integrates commits incrementally. Worktrees see **committed** branch state, not unsaved changes in another worktree. When coordinator updates this document or the shared contract on `main`, workers must retrieve it using `git show main:AGENTS.md` and `git show main:docs/INTEGRATION_CONTRACT.md` or merge/rebase `main` carefully.
+Create your worktree only if it does not exist yet: `git worktree list`, then
+`git worktree add ~/projects/brambilla-<name> -b agent/<name> main`. Never recreate or overwrite
+an existing worktree. Coordinator is the sole integration and deployment owner; only
+`main` reaches Railway. Workers commit small, testable changes on their branch and send the
+Coordinator a handoff (commit hash, changed files, tests run, blockers, dependencies).
 
-**Priority rule:** ~90% of technical effort should maximize functional correctness of score-bearing paths. The UI runs in parallel with its own dedicated agent. Do not stall core tasks on visual polish.
+Shared helpers every test agent may import: `tests/acceptance/conftest.py` (HTTP client,
+`search`, `by_legacy`, `assoc_ids`, local export file server) and `tests/reference/sinergia.py`
+(pure-Python reference migration giving expected outcomes per `id_legacy`). Black-box tests
+run against `BASE_URL` with `CRM_TOKEN`; the local server is
+`DATABASE_URL=postgresql://brambilla:brambilla@127.0.0.1:5433/brambilla`.
+
+Form checks on the platform reset production data and spend model credit: only the
+Coordinator runs them. `tests/acceptance/test_assistant.py` and anything under
+`tests/assistant-eval/` call the real model: run them on purpose, a few at a time.
+
+**Priority rule:** ~90% of technical effort should maximize functional correctness of
+score-bearing paths. P0 reachable correct API with reset/migration and persistence; P1 R1-R12,
+assistant, conformity, concurrency; P2 production integration and form-check failures; P3 UI
+quality; P4 experiments.
 
 ## 4. Shared integration contract (Coordinator must publish early)
 
