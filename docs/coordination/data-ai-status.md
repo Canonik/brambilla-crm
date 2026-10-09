@@ -57,8 +57,9 @@ R11 task from a CSV import, R12 company from an email domain, 409 on a duplicate
   rule) and R13; flagged in case a conformity check expects validation on the API.
 - **Evidence trace registry** (`evidence.py`, Agent 4): the new tools `find_by_legacy_id`,
   `search_products`, `preview_attachment` (reads) and `import_attachment` (write, records =
-  `created[].id`) plus `list_deal_line_items` from `origin/main` are not in `TOOLS`; see what the
-  observer does with unregistered names before relying on the inspector for an import turn.
+  `created[].id`) plus `list_deal_line_items` from `origin/main` are not in `TOOLS`: `begin()`
+  skips an unregistered tool and marks the whole trace `incomplete: true`, so an import turn shows
+  no event for the import in the inspector. Five one-line registry entries fix it (Agent 4's file).
 
 ## 3. Assistant failures found and root causes (state before `c3b6ecd`)
 
