@@ -100,13 +100,17 @@ Migration run (sample export, scratch DB): see section 2.
 
 ## 6. Branch and commit
 
-`agent/data-ai` at `c3b6ecd` (code) plus this status file. Merge target: main after `a6e39d4`.
+`agent/data-ai`: `c3b6ecd` (code), `dfaa3ec` (live smoke runner), plus this status file at the branch tip. Merge target: main after `a6e39d4`.
 
 ## 7. Single highest-value remaining fix
 
 One real-model smoke run on the deployed instance, with Coordinator approval and a hard cap of
-four conversations (about $0.10): a CSV import of three contacts, an ambiguous company name,
-example 2 (revenue), and a refused request (ex-employee as commerciale). Everything above is
+four conversations (about a dozen model calls): a CSV import of three contacts, an ambiguous
+company name with a clarifying second turn, example 2 (revenue), and a refused request
+(duplicate partita IVA). The runner is `server/tests/live_smoke_assistant.py` (commit `dfaa3ec`,
+not collected by pytest): `BASE_URL=... CRM_TOKEN=... python server/tests/live_smoke_assistant.py`
+prints every reply, checks the CRM state through the API, archives its own records, exit 1 on
+any failed check. Everything above is
 proven with a scripted model; whether GPT-6 Luna picks `preview_attachment`/`import_attachment`
 instead of hand-typing `create_records_bulk` is the only thing left unverified, and it decides the
 whole "CSV attachment" family of hidden requests. Second: decide `closedate = context.now` when
