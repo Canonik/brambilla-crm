@@ -172,6 +172,8 @@ def build_where(store, object_type: str, body: dict, params: list) -> str:
     if group_sql:
         clauses.append("(" + " OR ".join(group_sql) + ")")
     q = body.get("query")
+    if q is not None and len(str(q)) > 3000:
+        raise validation("query cannot be longer than 3000 characters")
     if q is not None and str(q).strip() != "":
         q = str(q).strip()
         # ILIKE metacharacters are literal text in the public query field.

@@ -38,3 +38,8 @@ Next: concurrency on one record and upserts, search and pagination on the migrat
 | Acceptance form_check + conformity + migration + rules on my server | 56 passed |
 
 Committed: 043583d (test_concurrency.py). Full backend suite 206 passed.
+
+## 13:30 conformity sweep (stopped on request)
+
+Reference-page sweep on the dated URLs: 152 calls across contacts, companies, deals, tickets, products, line items, quotes, notes/calls/emails/meetings/tasks, pipelines, properties, associations, lists, owners, 401 envelopes. Fixes: be02ef7 (association batch codes, label create, export by id, import cancel, list endpoints) and the commit after it (property create required fields and 409, query cap, 207 trace ids). Server suite 234 passed.
+Not enforced on purpose: the documented 10,000-result search cap and batch size limits, because the durability check pages the whole migrated volume.

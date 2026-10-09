@@ -8,7 +8,7 @@ from psycopg import sql
 from psycopg.types.json import Jsonb
 
 from .. import db, defaults
-from ..errors import not_found, validation
+from ..errors import ApiError, not_found, validation
 from ..store import invalidate_caches
 from ..util import now_iso
 from .common import batch_inputs, int_field, json_body, object_type_or_404
@@ -79,11 +79,18 @@ def drop_unique_index(conn, object_type: str, name: str) -> None:
     conn.execute(sql.SQL("DROP INDEX IF EXISTS {}").format(sql.Identifier(_unique_index_name(object_type, name))))
 
 
+def require_fields(body: dict) -> None:
+    """The reference marks these four as required when creating a property over the API."""
+    missing = [k for k in ("name", "label", "type", "fieldType", "groupName") if not body.get(k)]
+    if missing:
+        raise validation("Missing required property fields: " + ", ".join(missing))
+
+
 def create_property(conn, object_type: str, body: dict, *, replace: bool = False) -> dict:
     d = build_definition(object_type, body)
     existing = conn.execute("SELECT 1 FROM properties WHERE object_type = %s AND name = %s", (object_type, d["name"])).fetchone()
     if existing and not replace:
-        raise validation(f"Property {d['name']} already exists", [{"isValid": False, "message": "Property already exists", "error": "PROPERTY_EXISTS", "name": d["name"]}])
+        raise ApiError(409, f"Property {d['name']} already exists", "CONFLICT", [{"isValid": False, "message": "Property already exists", "error": "PROPERTY_EXISTS", "name": d["name"]}])
     if d["hasUniqueValue"]:
         ensure_unique_index(conn, object_type, d["name"])
     elif existing:
@@ -116,6 +123,7 @@ def list_properties(object_type: str, archived: str | None = None):
 async def create_property_ep(object_type: str, request: Request):
     ot = object_type_or_404(object_type)
     body = await json_body(request)
+    require_fields(body)
     with db.connection() as conn:
         d = create_property(conn, ot, body)
         conn.commit()
@@ -129,6 +137,7 @@ async def batch_create_properties(object_type: str, request: Request):
     results = []
     with db.connection() as conn:
         for inp in batch_inputs(body):
+            require_fields(inp)
             results.append(create_property(conn, ot, inp, replace=True))
         conn.commit()
     return {"status": "COMPLETE", "results": results, "startedAt": now_iso(), "completedAt": now_iso()}

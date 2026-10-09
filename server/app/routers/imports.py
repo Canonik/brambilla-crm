@@ -10,7 +10,7 @@ from psycopg.types.json import Jsonb
 from .. import db, defaults
 from ..errors import ApiError, not_found, validation
 from ..store import Store
-from ..util import iso, utcnow
+from ..util import iso, parse_record_id, utcnow
 
 router = APIRouter(prefix="/crm/v3/imports")
 
@@ -96,7 +96,14 @@ def list_imports():
 
 @router.post("/{import_id}/cancel")
 def cancel_import(import_id: str):
-    return {"id": import_id, "state": "CANCELED"}
+    with db.connection() as conn:
+        iid = parse_record_id(import_id)
+        row = conn.execute("SELECT definition FROM import_tasks WHERE id = %s", (iid if iid is not None else -1,)).fetchone()
+    if not row:
+        raise not_found(f"Import {import_id} not found")
+    at = row["definition"]["createdAt"]
+    # imports finish inside the create request, so there is nothing left to stop
+    return {"status": "CANCELED", "requestedAt": at, "startedAt": at, "completedAt": iso(utcnow()), "links": {}}
 
 
 @router.get("/{import_id}/errors")

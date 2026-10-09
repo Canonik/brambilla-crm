@@ -129,6 +129,26 @@ def export_status(task_id: str):
     return out
 
 
+@router.get("/export/{export_id}")
+def export_by_id(export_id: str):
+    with db.connection() as conn:
+        eid = parse_record_id(export_id)
+        row = conn.execute("SELECT id, status, request, content, created_at FROM export_tasks WHERE id = %s", (eid if eid is not None else -1,)).fetchone()
+    if not row:
+        raise not_found(f"Export {export_id} not found")
+    req = row["request"]
+    at = iso(row["created_at"])
+    out = {
+        "id": str(row["id"]), "exportName": req.get("exportName") or "export", "exportType": req.get("exportType"),
+        "objectType": defaults.type_id(defaults.resolve_type(req.get("objectType")) or "contacts"),
+        "objectProperties": req.get("objectProperties") or [], "createdAt": at, "updatedAt": at,
+        "exportState": {"COMPLETE": "DONE", "FAILED": "FAILED"}.get(row["status"], "PROCESSING"),
+    }
+    if row["content"] is not None:
+        out["recordCount"] = max(0, len(list(csv.reader(io.StringIO(bytes(row["content"]).decode("utf-8"))))) - 1)
+    return out
+
+
 @router.get("/download/{token}")
 def download(token: str):
     with db.connection() as conn:
