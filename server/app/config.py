@@ -24,14 +24,14 @@ if PUBLIC_BASE_URL and not PUBLIC_BASE_URL.startswith("http"):
     PUBLIC_BASE_URL = "https://" + PUBLIC_BASE_URL
 
 _default_ui = {
-    "contacts": "/contacts",
     "companies": "/companies",
+    "contacts": "/contacts",
     "deals": "/deals",
     "tickets": "/tickets",
-    "lists": "/lists",
-    "products": "/products",
+    "lists": "/dormant",
     "assistant": "/assistant",
 }
+FRONTEND_DIST = _env("FRONTEND_DIST", default=os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")))
 try:
     UI_ROUTES = json.loads(_env("UI_ROUTES_JSON", default="") or "null") or _default_ui
 except Exception:

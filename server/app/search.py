@@ -50,6 +50,25 @@ def _filter_sql(store, object_type: str, f: dict, params: list) -> str:
     op = (f.get("operator") or "").upper()
     if not name or not op:
         raise validation("filters require propertyName and operator")
+    if name.startswith("associations."):
+        target = defaults.resolve_type(name.split(".", 1)[1])
+        if target is None:
+            raise validation(f"Unknown association filter {name}")
+        values = f.get("values")
+        if values is None and f.get("value") is not None:
+            values = [f.get("value")]
+        try:
+            ids = [int(v) for v in (values or [])]
+        except (TypeError, ValueError):
+            raise validation(f"{name} requires numeric ids")
+        if not ids:
+            raise validation(f"{name} requires values")
+        params.append(ids)
+        params.append(target)
+        cond = "id IN (SELECT from_id FROM associations WHERE to_id = ANY(%s::bigint[]) AND to_type = %s)"
+        if op in ("NOT_IN", "NEQ"):
+            return "NOT " + cond
+        return cond
     defs = store.prop_defs(object_type)
     d = defs.get(name)
     ptype = d["type"] if d else "string"

@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Request, Response
 
 from .. import config, db, defaults
-from ..errors import validation
+from ..errors import ApiError, validation
 from ..store import invalidate_caches
 from .common import json_body
 
@@ -46,16 +46,31 @@ async def migrate(request: Request):
         raise validation("export_url is required")
     from ..migration.importer import run_migration
     from starlette.concurrency import run_in_threadpool
-    await run_in_threadpool(run_migration, url)
+    try:
+        await run_in_threadpool(run_migration, url)
+    except ApiError:
+        raise
+    except Exception as e:
+        log.exception("migration failed")
+        raise ApiError(500, f"migration failed: {type(e).__name__}: {str(e)[:300]}", "INTERNAL_ERROR")
     return Response(status_code=204)
 
 
 @router.post("/__agente")
 async def agente(request: Request):
-    body = await json_body(request)
+    try:
+        body = await json_body(request)
+    except Exception:
+        body = {}
     from ..assistant.agent import handle_conversation
     from starlette.concurrency import run_in_threadpool
-    reply = await run_in_threadpool(handle_conversation, body)
+    try:
+        reply = await run_in_threadpool(handle_conversation, body)
+        if not isinstance(reply, str) or not reply.strip():
+            reply = "Mi dispiace, non sono riuscito a elaborare la richiesta. Puoi riformularla?"
+    except Exception:
+        log.exception("assistant failed")
+        reply = "Mi dispiace, si è verificato un errore tecnico e non ho potuto completare la richiesta. Nessuna modifica è stata apportata al CRM."
     return {"reply": reply}
 
 
