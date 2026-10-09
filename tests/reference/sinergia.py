@@ -153,6 +153,14 @@ def money_str(d: Decimal | None) -> str | None:
     return None if d is None else str(d.quantize(CENT, ROUND_HALF_UP))
 
 
+def num_str(d: Decimal) -> str:
+    """Shortest plain form: 10, 2.5, 0.03 (never exponent notation)."""
+    q = d.quantize(CENT, ROUND_HALF_UP)
+    if q == q.to_integral():
+        return str(q.quantize(Decimal(1)))
+    return str(q).rstrip("0")
+
+
 def parse_currency(valuta: str, importo: str) -> str:
     v = (valuta or "").strip().lower()
     if v in ("eur", "euro", "€"):
@@ -215,9 +223,30 @@ def extract_vat(note: str) -> str | None:
 
 
 def norm_email(s: str) -> str | None:
-    e = (s or "").strip().lower().replace("(at)", "@")
-    e = re.sub(r"\s*@\s*", "@", e)
+    """A single address: trimmed and lower-cased, valid or absent. No repairs (`(at)`, inner spaces stay invalid)."""
+    e = (s or "").strip().lower()
     return e if EMAIL_RE.match(e) else None
+
+
+PHONE_LIKE_RE = re.compile(r"[\d\s+/().-]{6,}")
+
+
+def parse_email_field(s: str) -> tuple[str | None, list[str], str | None]:
+    """The raw `email` column: (email, additional valid emails, phone number found instead of an email)."""
+    raw = (s or "").strip()
+    if not raw:
+        return None, [], None
+    if PHONE_LIKE_RE.fullmatch(raw) and re.search(r"\d{6}", re.sub(r"\D", "", raw)):
+        return None, [], raw
+    tokens = [t for t in re.split(r"\s+e\s+|/|;|,", raw.lower()) if t.strip()]
+    valid = []
+    for t in tokens:
+        e = norm_email(t)
+        if e and e not in valid:
+            valid.append(e)
+    if not valid:
+        return None, [], None
+    return valid[0], valid[1:], None
 
 
 def norm_sku(code: str) -> str | None:
@@ -366,6 +395,11 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
     t0 = time.time()
     ex = Expected()
     st = ex.stats
+    for rows in data.values():
+        for r in rows:
+            for k, v in r.items():
+                if isinstance(v, str):
+                    r[k] = v.strip()
     users = Users(data["utenti"])
     ex.users = list(users.by_id.values())
 
@@ -434,11 +468,19 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
     live_ct = [r for r in data["contatti"] if not truthy(r["cancellato"])]
     st["contacts_deleted"] = len(data["contatti"]) - len(live_ct)
     for r in live_ct:
-        r["_email"] = norm_email(r["email"]) or ""
+        email, extra, phone_like = parse_email_field(r["email"])
+        r["_email"] = email or ""
+        r["_emails"] = ([email] if email else []) + extra
+        r["_phone"] = r["telefono"] or (phone_like or "")
         r["_mod"] = parse_dt(r["ultima_modifica"]) or datetime.min
         r["_company"] = co_survivor.get(r["id_azienda"], "")
+        r["_name"] = norm_text(r["nome"]) + "|" + norm_text(r["cognome"])
         if r["email"] and not r["_email"]:
             st["contacts_invalid_email"] += 1
+        if extra:
+            st["contacts_two_addresses"] += 1
+        if phone_like:
+            st["contacts_phone_in_email"] += 1
         if r["id_azienda"] and not r["_company"]:
             st["contacts_dangling_company"] += 1
     uf = UnionFind()
@@ -446,11 +488,35 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
     for r in live_ct:
         cid = r["id_contatto"]
         uf.find(cid)
-        if r["_email"]:
-            if r["_email"] in by_email:
-                uf.union(by_email[r["_email"]], cid)
+        for e in r["_emails"]:
+            if e in by_email:
+                uf.union(by_email[e], cid)
             else:
-                by_email[r["_email"]] = cid
+                by_email[e] = cid
+    # same name inside the same company joins the same person, unless that would join two different valid emails
+    comp_emails: dict[str, set[str]] = defaultdict(set)
+    for r in live_ct:
+        comp_emails[uf.find(r["id_contatto"])].update(r["_emails"])
+    by_name_company: dict[tuple[str, str], str] = {}
+    for r in live_ct:
+        if not r["_company"] or r["_name"] == "|":
+            continue
+        key = (r["_name"], r["_company"])
+        cid = r["id_contatto"]
+        if key not in by_name_company:
+            by_name_company[key] = cid
+            continue
+        ra, rb = uf.find(by_name_company[key]), uf.find(cid)
+        if ra == rb:
+            continue
+        ea, eb = comp_emails[ra], comp_emails[rb]
+        if ea and eb and not (ea & eb):
+            st["contacts_name_merge_blocked_by_emails"] += 1
+            continue
+        uf.union(ra, rb)
+        root = uf.find(ra)
+        comp_emails[root] = ea | eb
+        st["contacts_name_company_merges"] += 1
     cgroups: dict[str, list[dict]] = defaultdict(list)
     for r in live_ct:
         cgroups[uf.find(r["id_contatto"])].append(r)
@@ -464,6 +530,12 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
             ct_survivor[r["id_contatto"]] = surv
             ex.merged_into["contacts"][r["id_contatto"]] = surv
         email = pick(rows, "_email") or None
+        all_emails: list[str] = []
+        for r in rows:
+            for e in r["_emails"]:
+                if e not in all_emails:
+                    all_emails.append(e)
+        extra_emails = [e for e in all_emails if e != email]
         company = pick(rows, "_company")
         tipo = norm_text(pick(rows, "tipo"))
         lifecycle = LIFECYCLE.get(tipo) or LIFECYCLE.get(tipo.replace("-", " ")) or None
@@ -477,14 +549,19 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
             "firstname": pick(rows, "nome") or None,
             "lastname": pick(rows, "cognome") or None,
             "email": email,
-            "phone": pick(rows, "telefono") or None,
+            "phone": pick(rows, "_phone") or None,
             "lifecyclestage": lifecycle,
             "_rows": [r["id_contatto"] for r in rows],
             "_company": company or None,
+            "_additional_emails": set(extra_emails),
         }
+        if len(extra_emails) == 1:
+            props["hs_additional_emails"] = extra_emails[0]
+        elif not extra_emails:
+            props["hs_additional_emails"] = None
         ex.contacts[surv] = props
-        if email:
-            email_to_contact[email] = surv
+        for e in all_emails:
+            email_to_contact.setdefault(e, surv)
         if company:
             contact_company[surv] = company
             ex.associations.add(("contacts", surv, "companies", company))
@@ -540,9 +617,9 @@ def migrate(data: dict[str, list[dict]]) -> Expected:
         props = {
             "id_legacy": r["id_riga"],
             "name": name,
-            "quantity": str(qty),
+            "quantity": num_str(qty),
             "price": money_str(price),
-            "hs_discount_percentage": str(disc.normalize() if disc == disc.to_integral() else disc),
+            "hs_discount_percentage": num_str(disc),
             "amount": money_str(amount),
             "_product": sku if prod else None,
         }
