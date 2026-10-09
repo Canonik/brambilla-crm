@@ -374,3 +374,23 @@ def test_failure_after_a_write_reports_the_write(api, monkeypatch):
     reply = r.json()["reply"]
     assert f"update deals {deal['id']}" in reply and "Non ho modificato" not in reply
     assert get(api, "deals", deal["id"])["amount"] == "500"
+
+
+def test_preview_says_ex_employee_rows_are_still_imported(api):
+    seed_users()
+    company(api, "Nuova Serramenti Mazza S.r.l.", "264566")
+    pre = tool("preview_attachment", {}, attachments=[{"name": "o.csv", "content": DEALS_CSV}])
+    assert "Non è un motivo per rifiutare" in pre["guidance"]
+    res = tool("import_attachment", {}, attachments=[{"name": "o.csv", "content": DEALS_CSV}])
+    assert res["summary"]["created"] == 4  # the U29 and U47 rows are imported with an empty commerciale
+
+
+def test_archiving_a_company_with_open_deals_needs_confirmation(api):
+    seed_users()
+    comp = company(api, "Acme Archivio", "7")
+    api.post("/crm/v3/objects/deals", headers=H, json={"properties": {"dealname": "Aperta", "dealstage": "qualifiedtobuy"}, "associations": [{"to": {"id": comp["id"]}, "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 341}]}]})
+    r = tool("archive_record", {"object_type": "companies", "id": comp["id"]})
+    assert r["status"] == 409 and r["open_deals"] == 1 and api.get(f"/crm/v3/objects/companies/{comp['id']}", headers=H).status_code == 200
+    assert tool("archive_record", {"object_type": "companies", "id": comp["id"], "confirmed": True})["ok"]
+    empty = company(api, "Acme Senza Deal", "8")
+    assert tool("archive_record", {"object_type": "companies", "id": empty["id"]})["ok"]
