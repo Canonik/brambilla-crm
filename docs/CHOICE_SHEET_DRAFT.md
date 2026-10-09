@@ -1,7 +1,6 @@
 # Choice sheet
 
 Paste into the platform's Choices page between 15:00 and 15:30. Limit 20,000 characters.
-Before pasting: confirm section 3 against the final gap list.
 
 ## 1. What you found in the data that the requests didn't say
 
@@ -29,14 +28,14 @@ Before pasting: confirm section 3 against the final gap list.
 **Case: amounts, renewals, credit notes**
 
 - **Where**: `opportunita.csv` `importo` and `valuta`; `righe_offerta.prezzo_unitario`.
-- **How it's written**: `116.903,80`, `205,657.60`, `2947.68`, `1,257,280.17`, with `€`, `$`, `EUR`, `USD` before or after; `51.315,91 mensili`, `500,59 /mese`; `€206,5k`, `2 mln`; `Storno fattura 5079/2018` with `€ -5.131,24`; `Nota di credito n. 363/2016` with `4,086.16-`; `(20020,40)`.
+- **How it's written**: `116.903,80`, `205,657.60`, `1,257,280.17`, with `€`, `$`, `EUR`, `USD` before or after; `51.315,91 mensili`, `500,59 /mese`; `€206,5k`, `2 mln`; `Storno fattura 5079/2018` with `€ -5.131,24`; `Nota di credito n. 363/2016` with `4,086.16-`; `(20020,40)`.
 - **How many rows**: `valuta` empty in 8,445 deals; 1,320 with no amount; 841 monthly, all in Rinnovi; 95 `k`, 73 `mila`, 34 `mln`; 1,020 credit-note titles (831 negative, 189 in parentheses), all in Vinta, none with quote lines.
 - **How you noticed**: letters other than currency codes inside `importo`; R8 says to subtract what was reversed, and these rows are the only candidates.
 
 **Case: dates and missing close dates**
 
 - **Where**: `data_chiusura` (deals), `aperto_il` and `chiuso_il` (tickets), `data` (activities), `data_cambio` (`storico_fasi.csv`).
-- **How it's written**: `18/01/2015`, `2018-05-17`, `17/08/2021 09:02`, `20-04-2017`, `19/9/2015`, `04.09.18`, `42466`; a deal in `06 VINTA` with empty `data_chiusura` whose `storico_fasi` row into `06` is dated `17/08/2021 09:02`.
+- **How it's written**: `18/01/2015`, `2018-05-17`, `17/08/2021 09:02`, `20-04-2017`, `04.09.18`, `42466`; a deal in `06 VINTA` with empty `data_chiusura` whose `storico_fasi` row into `06` is dated `17/08/2021 09:02`.
 - **How many rows**: `data_chiusura`: 10,866 `dd/mm/yyyy`, 3,464 ISO, 2,448 `dd-mm-yyyy`, 2,330 serials, 2,239 `dd.mm.yy`, 11,801 empty. Live closed deals without a date: 1,082 won and 1,574 lost, 2,656 in all, every one with a history row into that stage; where both exist they agree in 2,060 of 2,060 cases.
 - **How you noticed**: `42466` as an Excel serial (origin 1899-12-30) is 2016-04-06, inside the neighbouring years; 6,592 rows have a day above 12 first, none second.
 
@@ -56,7 +55,7 @@ Before pasting: confirm section 3 against the final gap list.
 **Case: products, quantities, discounts**
 
 - **Where**: `righe_offerta.csv` (`codice_articolo`, `quantita`, `sconto`, `prezzo_unitario`), `listino.csv`.
-- **How it's written**: `BF-12288`, `art. 52614`, `BF 50096`, `bf49139`, `55091`, `BF.49711`, `BF 7096`; `20,00`, `1 pz`, `197,2 m`; `10%`, `25 %`, `15`, `0.2`, `0,25`.
+- **How it's written**: `BF-12288`, `art. 52614`, `BF 50096`, `bf49139`, `55091`, `BF 7096`; `20,00`, `1 pz`, `197,2 m`; `10%`, `25 %`, `15`, `0.2`, `0,25`.
 - **How many rows** (live): 1,173 line codes with fewer than five digits; 2,080 of 41,014 lines (917 codes) have no live product; 2,640 without a price; 9,406 without a discount; 117 codes republished at a new price.
 - **How you noticed**: joining by raw code matched a minority of lines.
 
@@ -70,7 +69,7 @@ Before pasting: confirm section 3 against the final gap list.
 **Case: the small things the data settled**
 
 - **Where**: `contatti.email`; `opportunita.contatti`, `pipeline`, `data_chiusura`; `utenti.attivo`; contacts without a company.
-- **How it's written**: `gallo.enrico@fratellinegri89.it e enrico.gallo@hotmail.it` (also `/`, `;`, `,`); `contatti` = `3615919,5256299` with ids that exist nowhere; `attivo` in `s`, `S`, `SI`, `n`, `N`, `NO`.
+- **How it's written**: `gallo.enrico@fratellinegri89.it e enrico.gallo@hotmail.it`; `contatti` = `3615919,5256299` with ids that exist nowhere; `attivo` in `s`, `S`, `SI`, `n`, `N`, `NO`.
 - **How many rows**: 111 rows with two addresses; 737 contact ids in deals that never exist; 1,072 deals with empty pipeline; 13,088 open deals with a date; 85 users, 20 inactive; 2,955 surviving contacts with no company but a company's email domain, 971 only through `hs_additional_domains`.
 
 ## 2. How you handled it and why
@@ -83,7 +82,7 @@ Before pasting: confirm section 3 against the final gap list.
 
 **Case: duplicate companies linked by VAT but not by website**
 
-- **What your CRM does**: union-find over live cards linking same normalized domain and same VAT; the survivor keeps the `id_legacy` of the latest `ultima_modifica`, each field takes the latest non-empty valid value, other domains go to `hs_additional_domains`.
+- **What your CRM does**: union-find over live cards linking same normalized domain and same VAT; the survivor keeps the `id_legacy` of the latest `ultima_modifica`, each field the latest non-empty valid value, other domains go to `hs_additional_domains`.
 - **Why this reading**: R1 gives the website as an example, not the only rule; a VAT identifies a legal entity more strongly, and 835 groups would stay split on the website alone.
 - **What you ruled out**: name plus city: 912 live groups share both (`Officine Cattaneo S.r.l.` exists in 16 cities), only 2 among cards with neither website nor VAT.
 - **How you verified it**: 2,312 rows merge into 2,060 groups, 17,386 companies survive, no two share a domain or VAT.
@@ -144,17 +143,17 @@ Before pasting: confirm section 3 against the final gap list.
 
 ## 3. What you didn't do
 
-- **Requests left out or half done**: (to be confirmed at 14:15)
+- **Requests left out or half done**: none of R1 to R12 is left out. Half done: R8 and R9 are computed once at migration and not recomputed when deals or activities change afterwards (the requests ask for them the day after the migration); the 10,000-result search cap and HubSpot's batch size limits are not enforced, so pagination over the whole volume works; export honors filters and sorts, imports handle creates and upserts only, no async state machine.
 - **Cases seen and not handled**:
   - The 20 tickets where the `Da:` header and a valid `id_contatto` disagree keep `id_contatto`.
   - The 936 `(at)` and ` @` emails stay absent.
   - The 3,396 deals whose stage history disagrees with `fase` keep `fase`.
-- **What you would do with one more hour**: (to be confirmed at 14:15)
+- **What you would do with one more hour**: (1) recompute `fatturato_2025`, `classe_cliente` and the dormant list when a deal or an activity changes after the migration; (2) run the assistant against a larger set of unseen Italian requests and tighten the tools where it asks instead of acting; (3) enforce HubSpot's search and batch limits with the documented 400 errors; (4) company page timeline filters and bulk actions in the interface.
 
 ## 4. The assistant
 
 - **What it can do**: answer questions on companies, contacts, deals, tickets, products and activities, also by Sinergia code; 2025 revenue and class through the same R8 computation as the migration; deal counts and totals by stage, rep, pipeline or year; a rep's own customers (deals they follow or tickets assigned to them); the dormant list. It creates and updates contacts, companies, deals, tickets, notes, calls, emails, meetings and tasks; associates, dissociates and archives records; previews and imports an attached Sinergia CSV of any of the seven kinds.
-- **How it works**: `openai/gpt-6-luna` through OpenRouter with native tool calling and 24 typed tools, 17 reads and 7 writes. Every tool runs against the same store as the API, so an assistant write passes the same validation and fires R7, R10, R11 and R12 like an API call. The system prompt carries `context.now` as today, the writer's user card from `utenti.csv` and the pipeline and stage ids; the whole conversation is replayed every turn. Names match in either word order ignoring `srl` or `spa`; `commerciale` and `assegnatario` are accepted by name. An attached CSV is read with the migration's own normalisers: the header decides the kind, Sinergia references (company, contact, deal, article, user) resolve to CRM records, rows already present by email, VAT, article code or Sinergia id are never duplicated, a preview tool answers questions on the attachment without writing, and the import goes row by row through the same validation, updating existing rows only on explicit request (price list excepted, R4).
+- **How it works**: `openai/gpt-6-luna` through OpenRouter with native tool calling and 24 typed tools, 17 reads and 7 writes. Every tool runs against the same store as the API, so an assistant write passes the same validation and fires R7, R10, R11 and R12 like an API call. When the assistant or the API closes a deal, `closedate` becomes the request clock (`context.now`) unless the write sets it, as HubSpot does; migrated deals keep their Sinergia date. The system prompt carries `context.now` as today, the writer's user card from `utenti.csv` and the pipeline and stage ids. Names match in either word order ignoring `srl` or `spa`; `commerciale` and `assegnatario` are accepted by name. An attached CSV is read with the migration's own normalisers: the header decides the kind, Sinergia references (company, contact, deal, article, user) resolve to CRM records, rows already present by email, VAT, article code or Sinergia id are never duplicated, a preview tool answers questions on the attachment without writing, and the import goes row by row through the same validation, updating existing rows only on explicit request (price list excepted, R4).
 - **When it asks, when it says no**: a write needs exactly one target. When a search returns several plausible candidates (the same name in two cities, several open deals of one company) it lists them with city, amount or stage and asks which, without asking for what the request already says. A request against the rules is not carried out and the reply says why: a VAT already in use (the store answers `409`), a company to be created from an email domain, a deal or ticket for a colleague who left (refused before the write, R3), deleting history without a stated reason. A question the data cannot answer gets "non lo so" rather than a guess.
 - **How you avoid damage**: write tools take record ids, never names, so every write follows a search the model has read; each write runs in its own transaction and a failed one is rolled back and removed from the list of things done, so the reply cannot claim it; there is no bulk update or delete tool; multi-record creation is capped at 200 rows per call. Assistant Insights is an optional panel under each reply (switch "Show evidence"): it shows the CRM operations the backend actually ran for that reply, each tool call in order with its outcome, writes split into requested, returned and commit confirmed, the record ids read or written with links and the associations the results carried, the revenue sum with its inputs, and a list of limits (empty searches, rejected writes, partial traces). It never shows raw arguments or results. It proves what the CRM did; it does not show the model's reasoning or prompts.
 
