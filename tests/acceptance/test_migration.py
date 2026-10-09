@@ -28,16 +28,19 @@ def expected():
 @pytest.fixture(scope="module")
 def ids(client, migrated, expected):
     """id_legacy -> CRM id maps per object type, read through search pagination (every record once)."""
+    from tests.reference.sinergia import KEY_PROPERTY
+
     out = {}
     for ot in OBJECTS:
+        key = KEY_PROPERTY.get(ot, "id_legacy")
         m = {}
         after = None
         total = None
         while True:
-            res = search(client, ot, properties=["id_legacy"], limit=200, after=after, sorts=[{"propertyName": "hs_object_id", "direction": "ASCENDING"}])
+            res = search(client, ot, properties=[key], limit=200, after=after, sorts=[{"propertyName": "hs_object_id", "direction": "ASCENDING"}])
             total = res["total"]
             for x in res["results"]:
-                m[x["properties"].get("id_legacy")] = x["id"]
+                m[x["properties"].get(key)] = x["id"]
             after = res.get("paging", {}).get("next", {}).get("after")
             if not after:
                 break
