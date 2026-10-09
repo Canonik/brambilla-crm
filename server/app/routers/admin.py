@@ -25,7 +25,7 @@ def reset_database() -> None:
         conn.execute("ALTER SEQUENCE lists_id_seq RESTART WITH 1")
         conn.execute("ALTER SEQUENCE export_id_seq RESTART WITH 1")
         conn.execute("ALTER SEQUENCE import_id_seq RESTART WITH 1")
-        defaults.ensure_defaults(conn)
+        defaults.ensure_defaults(conn, reset=True)
         conn.commit()
     invalidate_caches()
 
