@@ -82,3 +82,9 @@ contact 3256652), 693489 -> 1904632, 898572 -> 5594791.
 
 For the record: the mixed UTF-8/cp1252 rows (DECISIONS 0.7) are already handled by the server;
 the oracle had to catch up.
+
+## 11:40, acceptance status on bfe8e78 (main 33241fb)
+
+`test_migration.py` 27/27, `test_rules_behavior.py` 5/5, `test_form_check.py` +
+`test_api_conformity.py` 26/26, restart persistence pass, all on the sample export.
+Open: migration time (P0), the 46 ticket contacts from the `Da:` header, the assistant.
