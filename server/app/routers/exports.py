@@ -12,6 +12,7 @@ from .. import db, defaults
 from ..errors import not_found, validation
 from ..store import Store
 from ..search import build_where
+from ..util import parse_record_id
 from .common import json_body
 
 router = APIRouter(prefix="/crm/v3/exports")
@@ -55,6 +56,16 @@ async def start_export(request: Request):
         raise validation("exportType and format are required")
     if not body.get("objectType"):
         raise validation("objectType is required")
+    if defaults.resolve_type(body.get("objectType")) is None:
+        raise validation(f"Unknown objectType {body.get('objectType')!r}")
+    props = body.get("objectProperties")
+    if props is not None and (not isinstance(props, list) or not all(isinstance(p, str) for p in props)):
+        raise validation("objectProperties must be an array of property names")
+    if body.get("exportType") == "LIST" and parse_record_id(body.get("listId")) is None:
+        raise validation("listId is required for a LIST export")
+    search = body.get("publicCrmSearchRequest")
+    if search is not None and (not isinstance(search, dict) or not isinstance(search.get("filters", []), list)):
+        raise validation("publicCrmSearchRequest must be an object with a filters array")
     token = secrets.token_urlsafe(24)
     with db.connection() as conn:
         tid = int(conn.execute("SELECT nextval('export_id_seq') AS id").fetchone()["id"])
