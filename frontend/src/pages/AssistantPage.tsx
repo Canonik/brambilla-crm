@@ -14,7 +14,7 @@ export function AssistantPage() {
         title="Assistant"
         meta={
           <span>
-            Writing as <span className="text-ink">{user.name}</span> · the assistant reads and updates the CRM with the same rules as every other screen
+            Every answer shows its evidence: which records were read, what changed, which rule fired. Writing as <span className="text-ink">{user.name}</span>
           </span>
         }
       />

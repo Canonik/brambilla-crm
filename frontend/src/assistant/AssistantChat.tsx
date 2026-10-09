@@ -228,7 +228,7 @@ function RecordChips({ records }: { records: EvidenceRecord[] }) {
         );
         const cls = "group inline-flex max-w-[260px] items-center gap-1.5 rounded-md border border-line bg-surface px-2 py-1 text-[12.5px] font-medium text-ink";
         return (
-          <li key={`${r.type}:${r.id}`}>
+          <motion.li key={`${r.type}:${r.id}`} initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", stiffness: 500, damping: 28, delay: 0.15 }}>
             {href ? (
               <Link to={href} className={cn(cls, "transition-colors hover:border-gentian-line hover:bg-gentian-soft/60")} title={`${RECORD_NOUN[r.type] ?? r.type} ${r.id}`}>
                 {body}
@@ -236,10 +236,20 @@ function RecordChips({ records }: { records: EvidenceRecord[] }) {
             ) : (
               <span className={cls}>{body}</span>
             )}
-          </li>
+          </motion.li>
         );
       })}
     </ul>
+  );
+}
+
+export function EvidencePanel({ message }: { message: ChatMessage }) {
+  if (!message.evidence) return null;
+  return (
+    <motion.div initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.26, ease: EASE_OUT }} className="flex flex-col gap-2">
+      <EvidenceSummary message={message} />
+      <EvidenceInspector value={message.evidence} />
+    </motion.div>
   );
 }
 
@@ -261,11 +271,22 @@ function EvidenceSummary({ message }: { message: ChatMessage }) {
         records.push(r);
       }
     }
-    return { done, undone, records: records.slice(0, 3), more: Math.max(0, records.length - 3) };
+    const steps = Array.from(new Set(evidence.events.map((e) => e.label))).slice(0, 5);
+    return { done, undone, steps, records: records.slice(0, 3), more: Math.max(0, records.length - 3) };
   }, [evidence]);
-  if (!summary || (!summary.done.length && !summary.undone.length && !summary.records.length)) return null;
+  if (!summary || (!summary.done.length && !summary.undone.length && !summary.records.length && !summary.steps.length)) return null;
   return (
     <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.24, ease: EASE_OUT, delay: 0.1 }} className="mt-2 flex flex-col gap-2">
+      {summary.steps.length ? (
+        <motion.ol initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }} className="flex flex-col gap-1" aria-label="What the CRM did">
+          {summary.steps.map((label) => (
+            <motion.li key={label} variants={{ hidden: { opacity: 0, x: -6 }, show: { opacity: 1, x: 0, transition: { duration: 0.2, ease: EASE_OUT } } }} className="flex items-center gap-2 text-[12.5px] text-ink-2">
+              <span className="size-1.5 rounded-full bg-gentian" aria-hidden />
+              {label}
+            </motion.li>
+          ))}
+        </motion.ol>
+      ) : null}
       {summary.done.length ? (
         <p className="inline-flex items-start gap-1.5 self-start rounded-md border border-good/30 bg-good-soft px-2.5 py-1.5 text-[12.5px] font-medium text-good">
           <CircleCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden />
@@ -290,11 +311,11 @@ function EvidenceSummary({ message }: { message: ChatMessage }) {
 
 // ---------- thread ----------
 
-function Bubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => void }) {
+function Bubble({ message, onRetry, sideEvidence }: { message: ChatMessage; onRetry?: () => void; sideEvidence?: boolean }) {
   const { user } = useCurrentUser();
   const { evidenceEnabled } = useAssistant();
   const mine = message.role === "user";
-  const showEvidence = !mine && evidenceEnabled && Boolean(message.evidence);
+  const showEvidence = !mine && !sideEvidence && evidenceEnabled && Boolean(message.evidence);
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -349,20 +370,38 @@ function Bubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => vo
   );
 }
 
+const WORK_STEPS = ["Reading records", "Checking rules", "Writing the answer"];
+
 function Thinking() {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    const t = window.setInterval(() => setElapsed((s) => s + 1), 1000);
+    const t = window.setInterval(() => setElapsed((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, []);
-  const text =
-    elapsed < 3 ? "Reading the CRM" : elapsed < 12 ? "Working through the records" : elapsed < 30 ? "Still working, this request needs several lookups" : "Taking longer than usual, the assistant has up to a minute";
+  const step = Math.min(WORK_STEPS.length - 1, Math.floor(elapsed / 3));
+  const slow = elapsed >= 20;
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ duration: 0.2, ease: EASE_OUT }} className="flex gap-2.5">
       <AssistantMark className="mt-1" size={24} working />
-      <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-3.5 py-2.5 text-[13px] text-ink-2" role="status" aria-live="polite">
-        <span>{text}</span>
-        <span className="tnum text-ink-3">{elapsed}s</span>
+      <div className="rounded-lg border border-line bg-surface px-3.5 py-2.5 text-[13px] text-ink-2" role="status" aria-live="polite">
+        <div className="flex items-center gap-2 font-medium text-ink">
+          Reading the CRM
+          <span className="flex gap-1" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <span key={i} className="size-1.5 animate-bounce rounded-full bg-gentian" style={{ animationDelay: `${i * 120}ms` }} />
+            ))}
+          </span>
+          <span className="tnum text-[12px] font-normal text-ink-3">{elapsed}s</span>
+        </div>
+        <ol className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+          {WORK_STEPS.map((label, i) => (
+            <li key={label} className={cn("inline-flex items-center gap-1.5", i < step ? "text-ink-2" : i === step ? "text-gentian" : "text-ink-3")}>
+              <span className={cn("size-1.5 rounded-full", i <= step ? "bg-gentian" : "bg-line-strong", i === step && "mark-working")} aria-hidden />
+              {label}
+            </li>
+          ))}
+        </ol>
+        {slow ? <p className="mt-1.5 text-[12px] text-ink-3">This one needs several lookups. The assistant has up to a minute.</p> : null}
       </div>
     </motion.div>
   );
@@ -375,21 +414,38 @@ function EvidenceSwitch() {
       <div className="flex min-w-0 items-center gap-2 text-[11px] text-ink-2">
         <ShieldCheck className="size-3.5 shrink-0 text-gentian" aria-hidden />
         <span className="truncate">
-          Assistant Insights <span className="text-ink-3">· records and actions observed on the CRM</span>
+          Assistant Insights <span className="text-ink-3">· see what the CRM did</span>
         </span>
       </div>
-      <button type="button" role="switch" aria-checked={evidenceEnabled} onClick={() => setEvidenceEnabled(!evidenceEnabled)} className="inline-flex shrink-0 items-center gap-2 text-[11px] font-medium text-ink-2">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={evidenceEnabled}
+        onClick={() => setEvidenceEnabled(!evidenceEnabled)}
+        className="group inline-flex shrink-0 items-center gap-2 rounded-md px-1 py-0.5 text-[11.5px] font-medium text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gentian"
+      >
         Show evidence
-        <span className={cn("relative h-5 w-9 rounded-full transition-colors", evidenceEnabled ? "bg-gentian" : "bg-line-strong")}>
-          <span className={cn("absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform", evidenceEnabled ? "translate-x-[18px]" : "translate-x-0.5")} />
+        <span className={cn("relative inline-block h-5 w-9 shrink-0 rounded-full transition-colors duration-150", evidenceEnabled ? "bg-gentian" : "bg-line-strong")} aria-hidden>
+          <span className={cn("absolute top-0.5 left-0.5 block size-4 rounded-full bg-white shadow-sm transition-transform duration-150 ease-out", evidenceEnabled ? "translate-x-4" : "translate-x-0")} />
         </span>
       </button>
     </div>
   );
 }
 
+export function EvidenceBadge({ className }: { className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-sm border border-gentian-line bg-gentian-soft px-1.5 py-0.5 text-[11px] font-semibold text-gentian", className)}>
+      <ShieldCheck className="size-3" aria-hidden />
+      Evidence
+    </span>
+  );
+}
+
 export function AssistantChat({ variant = "panel" }: { variant?: "panel" | "page" | "home" }) {
-  const { messages, pending, retry } = useAssistant();
+  const { messages, pending, retry, evidenceEnabled } = useAssistant();
+  const side = variant === "page";
+  const latest = side && evidenceEnabled ? [...messages].reverse().find((m) => m.role === "assistant" && m.evidence) : undefined;
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -398,7 +454,7 @@ export function AssistantChat({ variant = "panel" }: { variant?: "panel" | "page
   }, [messages, pending]);
 
   return (
-    <div className={cn("flex h-full min-h-0 flex-col", variant === "page" && "mx-auto w-full max-w-3xl")}>
+    <div className={cn("flex h-full min-h-0 flex-col", variant === "page" && "mx-auto w-full max-w-6xl")}>
       <EvidenceSwitch />
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto scroll-quiet px-4 py-4">
         {messages.length === 0 ? (
@@ -415,11 +471,19 @@ export function AssistantChat({ variant = "panel" }: { variant?: "panel" | "page
             <SuggestionChips compact={variant === "panel"} />
           </div>
         ) : (
-          <div className="space-y-4">
-            {messages.map((m, i) => (
-              <Bubble key={m.id} message={m} onRetry={m.failed && i === messages.length - 1 ? retry : undefined} />
-            ))}
-            <AnimatePresence>{pending ? <Thinking key="thinking" /> : null}</AnimatePresence>
+          <div className={cn(side && "grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start")}>
+            <div className="min-w-0 space-y-4">
+              {messages.map((m, i) => (
+                <Bubble key={m.id} message={m} sideEvidence={side} onRetry={m.failed && i === messages.length - 1 ? retry : undefined} />
+              ))}
+              <AnimatePresence>{pending ? <Thinking key="thinking" /> : null}</AnimatePresence>
+            </div>
+            {latest ? (
+              <aside aria-label="Evidence for the latest answer" className="min-w-0 xl:sticky xl:top-0">
+                <p className="mb-2 text-[12px] font-medium text-ink-2">Evidence for the latest answer</p>
+                <EvidencePanel key={latest.id} message={latest} />
+              </aside>
+            ) : null}
           </div>
         )}
       </div>
