@@ -1,6 +1,6 @@
 # Current status (shared, edited only by the Coordinator)
 
-Updated: 2026-10-09 13:22 Europe/Rome. Freeze: 15:30. Production:
+Updated: 2026-10-09 13:26 Europe/Rome. Freeze: 15:30. Production:
 https://faithful-emotion-production-1fe1.up.railway.app (Railway project final-alessandro-canoni-b32bfd,
 auto-deploys every push to `main`).
 
@@ -14,14 +14,14 @@ Workers never edit this file. Each worker keeps its own file in this directory o
 | 75d0043 | 12:32 | success | /health 200, SPA served, 401 without token | previous release, no authenticated checks run by the current coordinator |
 | a6e39d4 | 12:52 | success 12:53 | /health 200, SPA bundle hash matches local build, 401 without token | `hackitaly-good-001` (authenticated production checks still pending the token) |
 | 78feee0 | 13:17 | success 13:18 | authenticated read-only check 13:18: stats, legacy and dated reads, search totals equal to the oracle, pipelines, dormant list, owners, properties, labels, SPA routes; 40 parallel reads p95 0.24 s | `hackitaly-good-002`: assistant CSV tools, insights inspector, new UI; local unit 196, acceptance 65, vitest 60 |
-| d8c0fd4 | pending | pending | full local check: unit 227, form+conformity+dated 33, migration+rules 32 | release 4 candidate: exports 202 and filters, numeric validation, unique custom properties, closedate on close, list and import shapes, concurrency tests; push after the live assistant smoke finishes |
+| 5bb299e | 13:23 | success 13:25 | authenticated read-only check 13:25 all 200, export create 202, 40 parallel reads p95 0.32 s; local unit 227, acceptance 65 | release 4 candidate: exports 202 and filters, numeric validation, unique custom properties, closedate on close, list and import shapes, concurrency tests; push after the live assistant smoke finishes |
 | 2694c78 | 13:07 | success 13:08 | /health 200, bundle unchanged, 401 without token | dated route families, 4xx on malformed input, rate limit 50000/10 s; local: unit 176, form+conformity+dated 33, migration+rules 32 |
 
 Local evidence on a6e39d4 (server on 127.0.0.1:8040, database `brambilla_release`):
 `server/tests` 26 passed; `tests/acceptance/test_form_check.py` + `test_api_conformity.py` 26 passed;
 `test_migration.py` + `test_rules_behavior.py` 32 passed (migration 26.9 s locally); `npm ci && npm run build` exit 0.
 
-Known-good tags: `hackitaly-good-001` = a6e39d4, `hackitaly-good-002` = 78feee0. Convention `hackitaly-good-NNN` on `main`.
+Known-good tags: `hackitaly-good-001` = a6e39d4, `hackitaly-good-002` = 78feee0, `hackitaly-good-003` = 5bb299e. Convention `hackitaly-good-NNN` on `main`.
 
 Credentials: `~/.brambilla-secrets.env` holds `CRM_TOKEN` and `OPENROUTER_API_KEY` since 13:18 (never committed). Railway CLI stays logged out (GitHub 2FA failed); deploy status comes from the GitHub commit status and the bundle hash.
 
