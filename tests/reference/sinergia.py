@@ -325,7 +325,7 @@ def load_export(path: str | Path) -> dict[str, list[dict]]:
         for name in FILES:
             with open(path / f"{name}.csv", encoding="cp1252", newline="") as f:
                 out[name] = list(csv.DictReader(f, delimiter=";"))
-        return out
+        return _normalize(out)
     with zipfile.ZipFile(path) as zf:
         names = {Path(n).name.lower(): n for n in zf.namelist() if n.lower().endswith(".csv")}
         for name in FILES:
@@ -335,6 +335,10 @@ def load_export(path: str | Path) -> dict[str, list[dict]]:
             with zf.open(member) as raw:
                 text = io.TextIOWrapper(raw, encoding="cp1252", newline="")
                 out[name] = list(csv.DictReader(text, delimiter=";"))
+    return _normalize(out)
+
+
+def _normalize(out: dict[str, list[dict]]) -> dict[str, list[dict]]:
     for rows in out.values():
         for r in rows:
             for k, v in list(r.items()):
