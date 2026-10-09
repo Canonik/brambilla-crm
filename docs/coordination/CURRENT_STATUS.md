@@ -60,7 +60,7 @@ Legend: PASS = test evidence on a6e39d4; PROD = verified on production; UNTESTED
 | R10 won deal ticket | 4 | 3 | `rules.py` on stage transition | `test_rules_behavior.py` PASS 12:55 | none | low |
 | R11 lost deal task | 3 | 3 | `rules.py` | `test_rules_behavior.py` PASS 12:55 | none | low |
 | R12 contact finds company | 3 | 3 | `rules.py` on create and email change, migration | `test_rules_behavior.py` PASS 12:55 | none | low |
-| R13 assistant | 30 | 2 (tools), 5 (verification) | OpenRouter tool loop, 19 tools, evidence observer off by default | `server/tests/test_assistant.py` scripted model, 26 passed | none; real-model end-to-end never run by this coordinator | HIGH: untested against the real model and the organizer flow |
+| R13 assistant | 30 | 2 (tools), 5 (verification) | OpenRouter tool loop, 24 tools, CSV attachment preview and import, evidence observer off by default | scripted-model suites 35 passed | live smoke on production 13:21 (release 3): CSV import of 2 contacts, ambiguity then clarification with one R10 ticket, duplicate VAT refusal: 0 failed checks; revenue scenario skipped (company lookup) | medium: ~40 unseen requests; second smoke script requested |
 | API conformity | 10 | 3 | HubSpot v3/v4 shapes, date-versioned contacts route | `test_api_conformity.py` 26 passed | 401 envelope PROD | medium |
 | Durability | 10 | 3 | PostgreSQL, metadata preserved on restart (77c1f22) | `test_durability_local.py` PASS 12:55, restart test on agent/score-restart-fix | none | medium: Railway latency under 20 readers unmeasured |
 | Jury: UI | 20 percent of top 6 | 1 | SPA at `/companies`, `/deals`, `/dormant`, `/tickets`, `/assistant` | vitest, build | SPA loads PROD | medium |
@@ -100,5 +100,5 @@ tickets with a dead contact reference use the `Da:` line.
 - 13:10 Human started an organizer form check on production (release 2); earlier checks today: 11:53 4/6, 12:10 4/6, 12:34 5/6 (failing item unknown to the coordinator).
 - 13:17 Release 3 pushed (78feee0); Railway success 13:18; authenticated production checks pass; tagged `hackitaly-good-002`.
 - 13:19 Merging agent/backend-reliability 9e716c7 for release 4; full check running.
-- 13:21 Human authorized the live assistant smoke on production and release 4; smoke running (4 conversations).
+- 13:21 Human authorized the live assistant smoke on production and release 4. Smoke on release 3: 0 failed checks (scenario 3 revenue skipped, company lookup by the runner). Release 4 pushed 13:23.
 - 13:20 Production migration timing read from /__stats: the 13:10 organizer form check migrated the sample export in 30.9 s on Railway (build 17.3, copy 5.8, indexes 4.9); 538,354 records, 1,666,162 associations, 936 dormant, classes A 52 B 25 C 65, identical to the oracle.
