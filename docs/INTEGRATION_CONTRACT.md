@@ -9,7 +9,7 @@ agent implements the migration from that file, section by section.
 
 | Part | Choice | Directory | Owner |
 |---|---|---|---|
-| Backend + API + assistant | Python 3.12, FastAPI, asyncpg (raw SQL, no ORM), PostgreSQL | `server/` | Core |
+| Backend + API + assistant | Python 3.12, FastAPI, psycopg 3 (raw SQL, no ORM), PostgreSQL | `server/` | Core |
 | Frontend | Vite + React + TypeScript SPA, built to `frontend/dist` | `frontend/` | UI |
 | Deployment | One Railway service built from the root `Dockerfile`; Railway PostgreSQL plugin | root | Coordinator |
 
@@ -185,3 +185,22 @@ Root `Dockerfile` (multi-stage: Node builds `frontend/dist`, Python image runs
 `uvicorn server.main:app --host 0.0.0.0 --port $PORT`). `railway.json` sets the Dockerfile
 builder and `/health` as the healthcheck. The frontend build failing never breaks the image:
 the UI stage falls back to a placeholder page so the API keeps scoring.
+
+## 9. Coordinator notes to workers (updated 11:20)
+
+- **Core**: your `server/app` layout is fine. Expose the ASGI app as `server.main:app`
+  (a one-line `server/main.py` importing `app.main:app` or similar is enough; keep imports
+  relative to the repo root since the Dockerfile copies `server/` into `/app/server/`).
+  Default `ui` map must be exactly the section 6 one: `{"companies":"/companies",
+  "contacts":"/contacts","deals":"/deals","tickets":"/tickets","lists":"/dormant",
+  "assistant":"/assistant"}` (no `products`, the UI has no products page). Never commit
+  `server/.venv` (root `.gitignore` already excludes `.venv/`). Serve `frontend/dist` with an
+  SPA fallback when the directory exists, otherwise a plain HTML placeholder, for every UI route.
+  Acceptance tests you can run against your server: `BASE_URL=http://127.0.0.1:8000
+  CRM_TOKEN=dev-token .venv/bin/pytest -q tests/acceptance` from the repo root on `main`
+  (`git show main:tests/acceptance/<file>` or merge `main` into `agent/core`).
+- **UI**: the dormant customers page lives at `/dormant`. Sign-in page posts the token to
+  `POST /ui/login` (cookie session) and then every call goes to the real `/crm/...` and
+  `/ui/api/...` endpoints with `credentials: "include"`. Keep the mock router for tests only.
+- **Both**: commit on your branch at every working milestone; the coordinator merges `main`
+  from the branches, not from worktrees.
