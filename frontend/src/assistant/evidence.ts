@@ -25,12 +25,17 @@ export const EVIDENCE_TOOLS: Record<string, { label: string; operation: Evidence
   list_users: { label: "Retrieved active users", operation: "read" },
   pipelines: { label: "Retrieved pipelines", operation: "read" },
   dormant_list: { label: "Retrieved dormant customers", operation: "read" },
+  find_by_legacy_id: { label: "Looked up a Sinergia legacy id", operation: "read" },
+  search_products: { label: "Searched the price list", operation: "read" },
+  list_deal_line_items: { label: "Retrieved deal line items", operation: "read" },
+  preview_attachment: { label: "Previewed a CSV attachment", operation: "read" },
   create_record: { label: "Created a CRM record", operation: "write" },
   update_record: { label: "Updated a CRM record", operation: "write" },
   associate: { label: "Associated CRM records", operation: "write" },
   dissociate: { label: "Removed a CRM association", operation: "write" },
   archive_record: { label: "Archived a CRM record", operation: "write" },
   create_records_bulk: { label: "Created CRM records in bulk", operation: "write" },
+  import_attachment: { label: "Imported a CSV attachment", operation: "write" },
 };
 
 export type EvidenceFailure = "validation" | "not_found" | "conflict" | "rate_limited" | "rejected" | "error";

@@ -39,6 +39,19 @@ describe("assistant evidence projection", () => {
     expect(value?.incomplete).toBe(true);
   });
 
+  it("accepts the attachment, legacy id and line item tools", () => {
+    const value = projectEvidence({
+      version: 1, incomplete: false,
+      events: [
+        { sequence: 1, call: 1, tool: "preview_attachment", operation: "read", status: "completed" },
+        { sequence: 2, call: 2, tool: "import_attachment", operation: "write", status: "committed", records: [{ type: "contacts", id: "801" }] },
+        { sequence: 3, call: 3, tool: "list_deal_line_items", operation: "read", status: "completed", records: [{ type: "deals", id: "42" }, { type: "line_items", id: "700" }], relations: [{ from: { type: "deals", id: "42" }, to: { type: "line_items", id: "700" } }] },
+      ],
+    });
+    expect(value?.incomplete).toBe(false);
+    expect(value?.events.map((event) => event.label)).toEqual(["Previewed a CSV attachment", "Imported a CSV attachment", "Retrieved deal line items"]);
+  });
+
   it("fails closed for malformed envelopes and links only supported record pages", () => {
     expect(projectEvidence(null)).toBeNull();
     expect(projectEvidence({ version: 2, events: [], incomplete: false })).toBeNull();

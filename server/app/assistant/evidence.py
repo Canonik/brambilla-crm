@@ -26,7 +26,8 @@ FAILURES = {400: "validation", 404: "not_found", 409: "conflict", 429: "rate_lim
 FAILURE_KINDS = frozenset(("validation", "not_found", "conflict", "rate_limited", "rejected", "error"))
 LIST_TOOLS = frozenset(
     ("search_companies", "search_contacts", "search_deals", "search_tickets",
-     "my_customers", "dormant_list", "list_activities", "list_users")
+     "my_customers", "dormant_list", "list_activities", "list_users",
+     "find_by_legacy_id", "search_products", "list_deal_line_items")
 )
 RECORD_TYPES = frozenset(
     ("companies", "contacts", "deals", "tickets", "products", "line_items",
@@ -49,12 +50,17 @@ TOOLS: dict[str, tuple[str, str]] = {
     "list_users": ("read", "Retrieved active users"),
     "pipelines": ("read", "Retrieved pipelines"),
     "dormant_list": ("read", "Retrieved dormant customers"),
+    "find_by_legacy_id": ("read", "Looked up a Sinergia legacy id"),
+    "search_products": ("read", "Searched the price list"),
+    "list_deal_line_items": ("read", "Retrieved deal line items"),
+    "preview_attachment": ("read", "Previewed a CSV attachment"),
     "create_record": ("write", "Created a CRM record"),
     "update_record": ("write", "Updated a CRM record"),
     "associate": ("write", "Associated CRM records"),
     "dissociate": ("write", "Removed a CRM association"),
     "archive_record": ("write", "Archived a CRM record"),
     "create_records_bulk": ("write", "Created CRM records in bulk"),
+    "import_attachment": ("write", "Imported a CSV attachment"),
 }
 
 
@@ -185,6 +191,40 @@ def _records(tool: str, args: dict, result: Any) -> tuple[list[dict[str, str]], 
             for row in rows:
                 if isinstance(row, dict):
                     add(row.get("type"), row.get("id"))
+    elif tool == "find_by_legacy_id":
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add(row.get("object_type"), row.get("id"))
+    elif tool == "search_products":
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add("products", row.get("id"))
+    elif tool == "list_deal_line_items":
+        deal_id = result.get("deal_id")
+        add("deals", deal_id)
+        rows = result.get("results")
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    add("line_items", row.get("id"))
+                    link("deals", deal_id, "line_items", row.get("id"))
+                    product = row.get("product")
+                    if isinstance(product, dict):
+                        add("products", product.get("id"))
+                        link("line_items", row.get("id"), "products", product.get("id"))
+    elif tool == "import_attachment":
+        # Rows the import created or updated are the only records it vouches for;
+        # skipped and failed rows did not change the CRM.
+        for key in ("created", "updated"):
+            rows = result.get(key)
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict):
+                        add(row.get("object_type"), row.get("id"))
     elif tool == "revenue":
         add("companies", result.get("company_id"))
         rows = result.get("won_deals")

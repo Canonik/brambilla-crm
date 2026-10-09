@@ -132,3 +132,38 @@ def test_relations_and_counts_stay_inside_the_byte_budget():
     assert value["incomplete"] is True
     assert len(json.dumps(value, separators=(",", ":")).encode()) <= 32_768
     assert all(len(event.get("relations", [])) <= 40 for event in value["events"])
+
+
+def test_attachment_legacy_and_line_item_tools_produce_events_not_an_incomplete_trace():
+    observer = EvidenceTrace(True)
+    legacy = observer.begin("find_by_legacy_id", {"id_legacy": "azienda 264566"})
+    observer.returned(legacy, {"id_legacy": "264566", "total": 1, "results": [{"object_type": "companies", "id": "18", "name": "SECRET"}]})
+    products = observer.begin("search_products", {"sku": "BF-12288"})
+    observer.returned(products, {"total": 1, "results": [{"id": "500", "hs_sku": "BF-12288", "name": "SECRET"}]})
+    lines = observer.begin("list_deal_line_items", {"deal_id": "42"})
+    observer.returned(lines, {"deal_id": "42", "total": 1, "returned": 1, "results": [{"id": "700", "name": "SECRET", "product": {"id": "500", "name": "SECRET"}}]})
+    preview = observer.begin("preview_attachment", {"name": "contatti.csv"})
+    observer.returned(preview, {"attachment": "SECRET.csv", "object_type": "contacts", "rows": [{"line": 2, "email": "SECRET"}]})
+    imported = observer.begin("import_attachment", {"name": "contatti.csv"})
+    observer.returned(imported, {
+        "attachment": "SECRET.csv", "object_type": "contacts",
+        "summary": {"rows": 3, "created": 1, "updated": 1, "skipped": 1, "failed": 0},
+        "created": [{"line": 2, "id": "801", "object_type": "contacts", "label": "SECRET"}],
+        "updated": [{"line": 3, "id": "77", "object_type": "contacts", "label": "SECRET"}],
+        "skipped": [{"line": 4, "reason": "SECRET", "id": "78"}], "failed": [],
+    })
+    observer.transaction_finished(imported, "committed")
+    value = observer.snapshot()
+    assert value["incomplete"] is False
+    final = {event["tool"]: event for event in value["events"] if "records" in event}
+    assert final["find_by_legacy_id"]["records"] == [{"type": "companies", "id": "18"}] and final["find_by_legacy_id"]["count"] == 1
+    assert final["search_products"]["records"] == [{"type": "products", "id": "500"}]
+    assert final["list_deal_line_items"]["records"] == [{"type": "deals", "id": "42"}, {"type": "line_items", "id": "700"}, {"type": "products", "id": "500"}]
+    assert final["list_deal_line_items"]["relations"] == [
+        {"from": {"type": "deals", "id": "42"}, "to": {"type": "line_items", "id": "700"}},
+        {"from": {"type": "line_items", "id": "700"}, "to": {"type": "products", "id": "500"}},
+    ]
+    assert final["preview_attachment"]["status"] == "completed" and final["preview_attachment"]["records"] == []
+    assert final["import_attachment"]["status"] == "committed"
+    assert final["import_attachment"]["records"] == [{"type": "contacts", "id": "801"}, {"type": "contacts", "id": "77"}]
+    assert "SECRET" not in json.dumps(value)
