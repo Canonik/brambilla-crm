@@ -79,7 +79,8 @@ export function ActivityFeed({
                       </span>
                     ) : null}
                     <time className="ml-auto text-ink-3 tnum" dateTime={a.timestamp ?? undefined} title={formatDateTime(a.timestamp)}>
-                      {formatDate(a.timestamp)} · {formatRelative(a.timestamp)}
+                      {formatDate(a.timestamp)}
+                      {(parseHsDate(a.timestamp)?.getTime() ?? 0) <= Date.now() ? ` · ${formatRelative(a.timestamp)}` : ""}
                     </time>
                   </div>
                   {a.body ? <p className="mt-1 text-[13px] leading-relaxed whitespace-pre-line text-ink">{a.body}</p> : null}

@@ -180,7 +180,12 @@ function Column({ pipeline, stage, owner }: { pipeline: Pipeline; stage: Stage; 
           </div>
           <div className="mt-0.5 pl-4 text-[12px] text-ink-2 tnum" title={sum.skipped ? `${sum.skipped} without amount not counted` : undefined}>
             {deals.length ? formatMoney(sum.total, "EUR", { compact: true }) : "–"}
-            {total !== undefined && all.length < total && !owner ? <span className="text-ink-3"> of {formatNumber(all.length)} loaded</span> : null}
+            {total !== undefined && all.length < total && !owner ? (
+              <span className="text-ink-3">
+                {" "}
+                · {formatNumber(all.length)} of {formatNumber(total)} loaded
+              </span>
+            ) : null}
           </div>
         </div>
       </header>

@@ -37,12 +37,17 @@ export function DateText({ value, className, withTime }: { value: unknown; class
   );
 }
 
-export function RelativeTime({ value, className }: { value: unknown; className?: string }) {
+/**
+ * "3 days ago" for past instants. Dates in the future (the export runs past
+ * today's clock) are shown as plain dates unless `allowFuture` is set.
+ */
+export function RelativeTime({ value, className, allowFuture }: { value: unknown; className?: string; allowFuture?: boolean }) {
   const d = parseHsDate(value);
   if (!d) return <span className={cn("text-ink-3", className)}>{DASH}</span>;
+  const future = d.getTime() > Date.now() + 60_000;
   return (
-    <time dateTime={d.toISOString()} title={formatDateTime(d)} className={cn("whitespace-nowrap", className)}>
-      {formatRelative(d)}
+    <time dateTime={d.toISOString()} title={formatDateTime(d)} className={cn("whitespace-nowrap tnum", className)}>
+      {future && !allowFuture ? formatDate(d) : formatRelative(d)}
     </time>
   );
 }

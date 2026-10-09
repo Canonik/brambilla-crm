@@ -38,11 +38,19 @@ export const USERS: CrmUser[] = [
   { email: "anna.sala@brambillaforniture.it", name: "Anna Sala", role: "Sales rep" },
 ];
 
+// The fallback above is only used until the API's owners have loaded; the
+// migrated export decides who the real users are.
 const byEmail = new Map(USERS.map((u) => [u.email.toLowerCase(), u]));
+let known: Map<string, CrmUser> = byEmail;
+
+export function setKnownUsers(users: CrmUser[]) {
+  known = new Map(users.map((u) => [u.email.toLowerCase(), u]));
+}
 
 export function userByEmail(email: string | null | undefined): CrmUser | null {
   if (!email) return null;
-  return byEmail.get(email.trim().toLowerCase()) ?? null;
+  const key = email.trim().toLowerCase();
+  return known.get(key) ?? byEmail.get(key) ?? null;
 }
 
 export function userName(email: string | null | undefined, fallback = "Unassigned"): string {

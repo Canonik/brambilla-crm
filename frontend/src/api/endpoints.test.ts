@@ -74,6 +74,13 @@ describe("endpoints against the mock backend", () => {
     expect(acts.some((a) => a.body === "Chiamare lunedì")).toBe(true);
   });
 
+  it("lists active owners as users", async () => {
+    const owners = await api.listOwners();
+    expect(owners.length).toBeGreaterThan(10);
+    expect(owners.some((o) => o.email === "anna.sala@brambillaforniture.it")).toBe(true);
+    expect(owners[0]!.name).toMatch(/\w/);
+  });
+
   it("answers the assistant contract", async () => {
     const res = await api.askAssistant({
       context: { now: "2026-12-02T10:00:00+01:00", user: "mattia.vigano@brambillaforniture.it" },

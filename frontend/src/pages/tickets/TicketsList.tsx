@@ -17,7 +17,7 @@ import { DateText, OwnerChip, RelativeTime } from "@/components/crm/Values";
 import { useListParams } from "@/lib/useListParams";
 import { formatNumber, truncate } from "@/lib/format";
 import { useDebounced } from "@/lib/useDebounced";
-import { displayStageLabel } from "@/lib/stages";
+import { displayStageLabel, isClosedTicketStage, pickSupportPipeline } from "@/lib/stages";
 import { cn } from "@/lib/cn";
 
 const KEYS = ["q", "status", "priority", "scope", "mine"] as const;
@@ -29,8 +29,10 @@ export function TicketsList() {
   const [params, setParams] = useListParams(KEYS, DEFAULTS);
   const q = useDebounced(params.q, 250);
   const pipelines = usePipelines("tickets");
-  const stages = useMemo(() => pipelines.data?.flatMap((p) => p.stages) ?? [], [pipelines.data]);
-  const closedIds = useMemo(() => stages.filter((s) => s.metadata?.isClosed === "true" || s.metadata?.isClosed === true || s.metadata?.ticketState === "CLOSED").map((s) => s.id), [stages]);
+  const support = pickSupportPipeline(pipelines.data);
+  const stages = useMemo(() => support?.stages ?? [], [support]);
+  const allStages = useMemo(() => pipelines.data?.flatMap((p) => p.stages) ?? [], [pipelines.data]);
+  const closedIds = useMemo(() => allStages.filter((s) => isClosedTicketStage(s)).map((s) => s.id), [allStages]);
   const mine = params.mine === "1";
 
   const queryParams = useMemo<TicketListParams>(
@@ -47,7 +49,7 @@ export function TicketsList() {
   const query = useTickets(queryParams);
   const rows = query.data?.pages.flatMap((p) => p.results) ?? [];
   const total = query.data?.pages[0]?.total;
-  const stageOf = (id: string | null | undefined) => stages.find((s) => s.id === id);
+  const stageOf = (id: string | null | undefined) => allStages.find((s) => s.id === id);
 
   return (
     <div className="flex flex-1 flex-col">

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/Badge";
 import type { Stage } from "@/api/types";
 import {
   displayStageLabel,
+  isClosedTicketStage,
   isLostStage,
   isWonStage,
   lifecycleLabel,
@@ -41,7 +42,7 @@ export function TicketStageBadge({ stage, stageId, size }: { stage?: Stage | nul
     );
   }
   const tone = stageTone(stage);
-  const closed = stage.metadata?.isClosed === "true" || stage.metadata?.isClosed === true || stage.metadata?.ticketState === "CLOSED";
+  const closed = isClosedTicketStage(stage);
   return (
     <Badge
       tone={closed ? "muted" : tone === "warn" ? "warn" : "brand"}

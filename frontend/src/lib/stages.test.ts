@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   classTone,
+  isClosedTicketStage,
+  pickSupportPipeline,
   displayPipelineLabel,
   displayStageLabel,
   isLostStage,
@@ -42,6 +44,23 @@ describe("won and lost detection", () => {
     expect(isLostStage({ id: "closedlost", label: "Closed Lost" })).toBe(true);
     expect(isLostStage({ id: "8", label: "Non rinnovato", metadata: { isClosed: "true", probability: "0.0" } })).toBe(true);
     expect(isWonStage({ id: "qualifiedtobuy", label: "Qualified" })).toBe(false);
+  });
+});
+
+describe("ticket pipelines", () => {
+  it("prefers Brambilla's Assistenza pipeline over HubSpot's default", () => {
+    const def = { id: "0", label: "Support Pipeline" };
+    const ass = { id: "163486089", label: "Assistenza" };
+    expect(pickSupportPipeline([def, ass])?.id).toBe(ass.id);
+    expect(pickSupportPipeline([def])?.id).toBe("0");
+    expect(pickSupportPipeline([def, { id: "77", label: "Other" }])?.id).toBe("77");
+    expect(pickSupportPipeline(undefined)).toBeUndefined();
+  });
+  it("reads ticketState and isClosed", () => {
+    expect(isClosedTicketStage({ id: "4", label: "Chiuso", metadata: { ticketState: "CLOSED" } })).toBe(true);
+    expect(isClosedTicketStage({ id: "1", label: "Aperto", metadata: { ticketState: "OPEN" } })).toBe(false);
+    expect(isClosedTicketStage({ id: "x", label: "Closed", metadata: { isClosed: "true" } })).toBe(true);
+    expect(isClosedTicketStage(undefined)).toBe(false);
   });
 });
 

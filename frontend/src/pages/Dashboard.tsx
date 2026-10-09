@@ -15,7 +15,7 @@ import { PriorityBadge, StageBadge, TicketStageBadge } from "@/components/crm/Ba
 import { Money, OwnerChip, RecordLink, RelativeTime } from "@/components/crm/Values";
 import { cn } from "@/lib/cn";
 import { formatNumber } from "@/lib/format";
-import { displayStageLabel, isLostStage, isWonStage } from "@/lib/stages";
+import { displayStageLabel, isClosedTicketStage, isLostStage, isWonStage } from "@/lib/stages";
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -48,7 +48,7 @@ export function Dashboard() {
   const openStages = d?.stageCounts.filter((s) => !isWonStage(s.stage) && !isLostStage(s.stage)) ?? [];
   const openDeals = openStages.reduce((a, s) => a + s.count, 0);
   const wonDeals = d?.stageCounts.filter((s) => isWonStage(s.stage)).reduce((a, s) => a + s.count, 0) ?? 0;
-  const openTickets = d?.ticketStageCounts.filter((s) => !(s.stage.metadata?.isClosed === "true" || s.stage.metadata?.isClosed === true)).reduce((a, s) => a + s.count, 0) ?? 0;
+  const openTickets = d?.ticketStageCounts.filter((s) => !isClosedTicketStage(s.stage)).reduce((a, s) => a + s.count, 0) ?? 0;
   const maxStage = Math.max(1, ...(d?.stageCounts.map((s) => s.count) ?? [1]));
   const maxTicket = Math.max(1, ...(d?.ticketStageCounts.map((s) => s.count) ?? [1]));
 
@@ -120,7 +120,7 @@ export function Dashboard() {
               ) : (
                 <ol className="space-y-2" aria-label="Tickets per status">
                   {d.ticketStageCounts.map(({ stage, count }) => {
-                    const closed = stage.metadata?.isClosed === "true" || stage.metadata?.isClosed === true;
+                    const closed = isClosedTicketStage(stage);
                     return (
                       <li key={stage.id} className="grid grid-cols-[140px_1fr_48px] items-center gap-3 text-[13px]">
                         <Link to={`/tickets?scope=all&status=${stage.id}`} className="truncate text-ink-2 hover:text-ink">
