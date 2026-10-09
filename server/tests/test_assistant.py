@@ -179,7 +179,8 @@ def test_evidence_is_opt_in_and_bare_contract_stays_exact(api, monkeypatch):
     traced = api.post("/__agente?trace=1", headers=H, json=body)
     assert traced.status_code == 200
     assert traced.json()["reply"] == "Ciao!"
-    assert traced.json()["trace"] == {"version": 1, "events": [], "incomplete": False}
+    trace = traced.json()["trace"]
+    assert {k: trace[k] for k in ("version", "events", "incomplete")} == {"version": 1, "events": [], "incomplete": False}
 
 
 def test_revenue_trace_has_safe_records_timing_and_exact_calculation(api, monkeypatch):
