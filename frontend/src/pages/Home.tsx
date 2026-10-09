@@ -45,13 +45,13 @@ export function Home() {
                 <p className="mt-4 max-w-sm text-[14px] leading-relaxed text-ink-2">Ask in plain words. Answers come in Italian, from the same records as every page.</p>
               </Rise>
               <Rise delay={0.08} className="min-w-0">
-                <div className="rounded-[22px] bg-[#111] p-4 text-white shadow-pop">
+                <div className="rounded-[22px] border border-line bg-surface p-4 text-ink shadow-pop">
                   <div className="mb-3 flex items-center gap-2.5 px-1">
-                    <AssistantMark size={26} className="bg-white/15 ring-1 ring-white/25" />
+                    <AssistantMark size={26} />
                     <span className="text-[14px] font-semibold">Ask the CRM</span>
                   </div>
-                  <SuggestionChips tone="dark" limit={4} />
-                  <Composer size="lg" tone="dark" autoFocus className="mt-3" />
+                  <SuggestionChips limit={4} />
+                  <Composer size="lg" autoFocus className="mt-3" />
                 </div>
               </Rise>
             </div>

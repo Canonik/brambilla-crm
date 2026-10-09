@@ -58,7 +58,7 @@ export function SuggestionChips({ className, compact, tone = "light", limit }: {
           <button
             type="button"
             onClick={() => setDraft(s.prompt)}
-            className={cn("group flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-colors", dark ? "border-white/15 bg-white/5 hover:border-white/30 hover:bg-white/10" : "border-line bg-surface hover:border-gentian-line hover:bg-gentian-soft/50")}
+            className={cn("group flex w-full items-start gap-2.5 rounded-md border px-3 py-2 text-left transition-colors", dark ? "border-white/15 bg-white/5 hover:border-white/30 hover:bg-white/10" : "border-line bg-surface-2 hover:border-gentian-line hover:bg-gentian-soft/50")}
           >
             <span className={cn("mt-[7px] size-1.5 shrink-0 rounded-full", s.kind === "write" ? "bg-signal" : "bg-gentian")} aria-hidden />
             <span className="min-w-0">
