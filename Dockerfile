@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir -r server/requirements.txt
 COPY server/ server/
 COPY --from=ui /ui/dist frontend/dist
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn server.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 75"]
+CMD ["sh", "-c", "if [ -f server/main.py ]; then M=server.main:app; else M=server.app.main:app; fi; exec uvicorn $M --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --timeout-keep-alive 75"]
